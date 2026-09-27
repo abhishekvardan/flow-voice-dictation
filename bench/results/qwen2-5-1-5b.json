@@ -1,0 +1,85 @@
+{
+  "label": "qwen2-5-1-5b",
+  "config": {
+    "whisper": "small on cuda (int8_float16)",
+    "beam": 0,
+    "ollama_model": "qwen2.5:1.5b",
+    "raw_mode": false
+  },
+  "samples": {
+    "short": {
+      "audio_s": 2.35,
+      "median_ms": {
+        "STT setup (VAD/lang)": 171.69310000463156,
+        "STT first segment": 569.695899997896,
+        "STT total": 570.3324999994948,
+        "LLM TTFT": 150.73889999621315,
+        "LLM generation": 94.97990000090795,
+        "LLM total": 247.08299999474548,
+        "Post-processing": 0.012600001355167478,
+        "Processing total": 797.8153999938513
+      },
+      "final": "Yeah, that sounds good to me. "
+    },
+    "medium": {
+      "audio_s": 6.4,
+      "median_ms": {
+        "STT setup (VAD/lang)": 235.54910000530072,
+        "STT first segment": 1387.4811000059708,
+        "STT total": 1389.2033000010997,
+        "LLM TTFT": 393.3729000054882,
+        "LLM generation": 289.57680000166874,
+        "LLM total": 675.8147000000463,
+        "Post-processing": 0.011500000255182385,
+        "Processing total": 2065.7092000037665
+      },
+      "final": "So, I think we should probably move the design review to Thursday because the new build is not ready yet. "
+    },
+    "long": {
+      "audio_s": 16.93,
+      "median_ms": {
+        "STT setup (VAD/lang)": 304.34459999378305,
+        "STT first segment": 2542.363900000055,
+        "STT total": 2542.4493000027724,
+        "LLM TTFT": 187.28849999752128,
+        "LLM generation": 815.7118000017363,
+        "LLM total": 999.2963999975473,
+        "Post-processing": 0.012600001355167478,
+        "Processing total": 3520.994200000132
+      },
+      "final": "Okay, here's the update. The login bug is fixed and deployed to staging. We still need to test the password reset flow and email templates. I think we can ship everything to production on Friday if QA signs off by Wednesday evening. Please let me know if anything is blocking you. "
+    }
+  },
+  "first_pass": {
+    "short": {
+      "STT setup (VAD/lang)": 492.22939999890514,
+      "STT first segment": 959.4005000035395,
+      "STT total": 960.2039000019431,
+      "LLM TTFT": 4452.081700001145,
+      "LLM generation": 134.70999999844935,
+      "LLM total": 4586.791699999594,
+      "Post-processing": 0.01720000000204891,
+      "Processing total": 5551.312900002813
+    },
+    "medium": {
+      "STT setup (VAD/lang)": 224.76979999919422,
+      "STT first segment": 1086.8985999986762,
+      "STT total": 1088.7981000050786,
+      "LLM TTFT": 291.61820000445005,
+      "LLM generation": 295.67609999503475,
+      "LLM total": 587.2942999994848,
+      "Post-processing": 0.0109999964479357,
+      "Processing total": 1676.8066000004183
+    },
+    "long": {
+      "STT setup (VAD/lang)": 909.2603999961284,
+      "STT first segment": 4121.559699997306,
+      "STT total": 4121.934099995997,
+      "LLM TTFT": 278.9392999984557,
+      "LLM generation": 813.9881999959471,
+      "LLM total": 1092.9274999944028,
+      "Post-processing": 0.013399992894846946,
+      "Processing total": 5215.880899995682
+    }
+  }
+}

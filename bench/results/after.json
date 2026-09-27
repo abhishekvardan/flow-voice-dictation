@@ -1,0 +1,100 @@
+{
+  "label": "after",
+  "config": {
+    "whisper": "small on cuda (int8_float16)",
+    "beam": 0,
+    "ollama_model": "qwen2.5:1.5b",
+    "raw_mode": false
+  },
+  "samples": {
+    "short": {
+      "audio_s": 2.35,
+      "median_ms": {
+        "STT setup (VAD/lang)": 128.41579999803798,
+        "STT first segment": 321.8994999988354,
+        "STT total": 322.93270000081975,
+        "LLM TTFT": 154.66629999718862,
+        "LLM generation": 95.98890000052052,
+        "LLM total": 250.65519999770913,
+        "Post-processing": 0.010600000678095967,
+        "Wait for key release": 0.15940000230330043,
+        "Insertion": 5.633299995679408,
+        "Clipboard restore": 400.7411000020511,
+        "Processing total": 687.5266999995802
+      },
+      "final": "Yeah, that sounds good to me. "
+    },
+    "medium": {
+      "audio_s": 6.4,
+      "median_ms": {
+        "STT setup (VAD/lang)": 170.54430000280263,
+        "STT first segment": 741.800299998431,
+        "STT total": 742.4918999968213,
+        "LLM TTFT": 156.32729999924777,
+        "LLM generation": 269.2629000011948,
+        "LLM total": 440.4869999998482,
+        "Post-processing": 0.011900003300979733,
+        "Processing total": 1324.2479000036838
+      },
+      "final": "So, I think we should probably move the design review to Thursday because the new build is not ready yet. "
+    },
+    "long": {
+      "audio_s": 16.93,
+      "median_ms": {
+        "STT setup (VAD/lang)": 193.6968000009074,
+        "STT first segment": 1285.895499997423,
+        "STT total": 1296.0915000003297,
+        "LLM TTFT": 165.3495999998995,
+        "LLM generation": 748.8721999980044,
+        "LLM total": 910.042000003159,
+        "Post-processing": 0.010600000678095967,
+        "Wait for key release": 0.2566999974078499,
+        "Insertion": 6.695699994452298,
+        "Clipboard restore": 400.7220999992569,
+        "Processing total": 2209.8427000019
+      },
+      "final": "Okay, here's the update. The login bug is fixed and deployed to staging. We still need to test the password reset flow and email templates. I think we can ship everything to production on Friday if QA signs off by Wednesday evening. Please let me know if anything is blocking you. "
+    }
+  },
+  "first_pass": {
+    "short": {
+      "STT setup (VAD/lang)": 723.0477999983123,
+      "STT first segment": 942.8812999976799,
+      "STT total": 942.9461000036099,
+      "LLM TTFT": 4430.7030999989365,
+      "LLM generation": 119.5231000019703,
+      "LLM total": 4550.226200000907,
+      "Post-processing": 0.01309999788645655,
+      "Wait for key release": 1.6328999990946613,
+      "Insertion": 11.103299999376759,
+      "Clipboard restore": 400.30429999751505,
+      "Processing total": 5508.598299995356
+    },
+    "medium": {
+      "STT setup (VAD/lang)": 154.74579999863636,
+      "STT first segment": 656.5814999994473,
+      "STT total": 657.8682000035769,
+      "LLM TTFT": 129.05809999938356,
+      "LLM generation": 279.08259999821894,
+      "LLM total": 408.1406999976025,
+      "Post-processing": 0.011500000255182385,
+      "Wait for key release": 0.42470000335015357,
+      "Insertion": 3.4145999961765483,
+      "Clipboard restore": 400.62290000059875,
+      "Processing total": 1070.386100000178
+    },
+    "long": {
+      "STT setup (VAD/lang)": 190.28249999973923,
+      "STT first segment": 837.5255999999354,
+      "STT total": 838.1988999972236,
+      "LLM TTFT": 186.05410000600386,
+      "LLM generation": 737.5983999954769,
+      "LLM total": 923.6525000014808,
+      "Post-processing": 0.00670000008540228,
+      "Wait for key release": 0.21009999909438193,
+      "Insertion": 6.068100003176369,
+      "Clipboard restore": 400.62639999814564,
+      "Processing total": 1768.631999999343
+    }
+  }
+}

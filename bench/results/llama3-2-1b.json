@@ -1,0 +1,85 @@
+{
+  "label": "llama3-2-1b",
+  "config": {
+    "whisper": "small on cuda (int8_float16)",
+    "beam": 0,
+    "ollama_model": "llama3.2:1b",
+    "raw_mode": false
+  },
+  "samples": {
+    "short": {
+      "audio_s": 2.35,
+      "median_ms": {
+        "STT setup (VAD/lang)": 159.37750000011874,
+        "STT first segment": 560.2693999971962,
+        "STT total": 560.4814999969676,
+        "LLM TTFT": 127.33949999528704,
+        "LLM generation": 111.44130000320729,
+        "LLM total": 239.04400000174064,
+        "Post-processing": 0.011600001016631722,
+        "Processing total": 815.055900005973
+      },
+      "final": "Um, yes, that sounds good to me. "
+    },
+    "medium": {
+      "audio_s": 6.4,
+      "median_ms": {
+        "STT setup (VAD/lang)": 200.03949999954784,
+        "STT first segment": 1020.6246000016108,
+        "STT total": 1020.9284000011394,
+        "LLM TTFT": 136.81480000377633,
+        "LLM generation": 235.33589999715332,
+        "LLM total": 366.2234000003082,
+        "Post-processing": 0.01069999416358769,
+        "Processing total": 1405.8690999954706
+      },
+      "final": "So I think we should probably move the design review to Thursday because the new build is not ready yet. "
+    },
+    "long": {
+      "audio_s": 16.93,
+      "median_ms": {
+        "STT setup (VAD/lang)": 274.5435000033467,
+        "STT first segment": 1885.8080999998492,
+        "STT total": 1886.1947000041255,
+        "LLM TTFT": 112.03220000606962,
+        "LLM generation": 848.5329000031925,
+        "LLM total": 961.2017999970703,
+        "Post-processing": 0.01290000363951549,
+        "Processing total": 2838.3152000023983
+      },
+      "final": "Okay, so here is the updated update: \n\"Okay, so here is the update. The login bug is fixed and deployed to staging. We still need to test the password reset flow and the email templates. I think we can ship everything to production on Friday if QA signs off by Wednesday evening. You know, so please let me know if anything is blocking you.\" "
+    }
+  },
+  "first_pass": {
+    "short": {
+      "STT setup (VAD/lang)": 577.4797999984003,
+      "STT first segment": 977.1392000038759,
+      "STT total": 977.4801000021398,
+      "LLM TTFT": 7956.935799993516,
+      "LLM generation": 122.53160000545904,
+      "LLM total": 8079.467399998975,
+      "Post-processing": 0.012600001355167478,
+      "Processing total": 9059.475400004885
+    },
+    "medium": {
+      "STT setup (VAD/lang)": 199.24629999877652,
+      "STT first segment": 868.0272999990848,
+      "STT total": 868.0768999984139,
+      "LLM TTFT": 169.7624000007636,
+      "LLM generation": 240.66610000591027,
+      "LLM total": 410.42850000667386,
+      "Post-processing": 0.010799994925037026,
+      "Processing total": 1279.1867999985698
+    },
+    "long": {
+      "STT setup (VAD/lang)": 302.39950000395766,
+      "STT first segment": 2268.1251000030898,
+      "STT total": 2268.2855000020936,
+      "LLM TTFT": 135.23970000096597,
+      "LLM generation": 840.3761000008672,
+      "LLM total": 975.6158000018331,
+      "Post-processing": 0.01189999602502212,
+      "Processing total": 3244.4842999975663
+    }
+  }
+}

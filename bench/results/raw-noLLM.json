@@ -1,0 +1,67 @@
+{
+  "label": "raw-noLLM",
+  "config": {
+    "whisper": "small on cuda (int8_float16)",
+    "beam": 0,
+    "ollama_model": "llama3.2",
+    "raw_mode": true
+  },
+  "samples": {
+    "short": {
+      "audio_s": 2.35,
+      "median_ms": {
+        "STT setup (VAD/lang)": 173.77529999794206,
+        "STT first segment": 639.6305000016582,
+        "STT total": 641.5608000024804,
+        "Post-processing": 0.3370000049471855,
+        "Processing total": 641.9200000018463
+      },
+      "final": "Um yeah that sounds good to me. "
+    },
+    "medium": {
+      "audio_s": 6.4,
+      "median_ms": {
+        "STT setup (VAD/lang)": 200.82190000539413,
+        "STT first segment": 981.382099998882,
+        "STT total": 982.1745000008377,
+        "Post-processing": 0.35149999894201756,
+        "Processing total": 982.5507999994443
+      },
+      "final": "So I think we should probably move the design review to Thursday because the new build is not ready yet. "
+    },
+    "long": {
+      "audio_s": 16.93,
+      "median_ms": {
+        "STT setup (VAD/lang)": 411.2734000009368,
+        "STT first segment": 2594.8682999951416,
+        "STT total": 2597.056899998279,
+        "Post-processing": 0.3715999991982244,
+        "Processing total": 2597.52060000028
+      },
+      "final": "Okay so here is the update um the login bug is fixed and deployed to staging a we still need to test the password reset flow and the the email templates and I think we can ship everything to production on Friday if QA signs off by Wednesday evening you know so please let me know if anything is blocking you "
+    }
+  },
+  "first_pass": {
+    "short": {
+      "STT setup (VAD/lang)": 755.3266999966581,
+      "STT first segment": 1473.6935000037192,
+      "STT total": 1474.7471000009682,
+      "Post-processing": 0.6009999997331761,
+      "Processing total": 1475.369599997066
+    },
+    "medium": {
+      "STT setup (VAD/lang)": 194.03959999908693,
+      "STT first segment": 1008.8804999977583,
+      "STT total": 1012.5847000017529,
+      "Post-processing": 0.35659999412018806,
+      "Processing total": 1012.964199995622
+    },
+    "long": {
+      "STT setup (VAD/lang)": 267.31419999850914,
+      "STT first segment": 2114.4143999990774,
+      "STT total": 2116.987000001245,
+      "Post-processing": 0.7096999979694374,
+      "Processing total": 2117.720399997779
+    }
+  }
+}
