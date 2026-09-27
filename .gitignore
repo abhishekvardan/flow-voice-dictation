@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Environments
+.venv/
+venv/
+
+# Generated benchmark speech samples (recreated by bench/benchmark.py)
+bench/samples/
+
+# Logs
+*.log
