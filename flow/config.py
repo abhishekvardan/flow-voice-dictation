@@ -46,6 +46,7 @@ class Config:
     language: str = "auto"
     language_detection_segments: int = 2  # more segments = steadier detection when language is "auto"
     cleanup_languages: str = DEFAULT_CLEANUP_LANGUAGES  # "all", or codes a small model handles well
+    streaming_stt: bool = True  # transcribe during the pause-separated parts of a long dictation
     whisper_beam_size: int = 0  # 0 = automatic (5 on GPU, 2 on CPU); 1 = greedy, fastest
     # Per-language Whisper models, used when a language is pinned (not "auto"): {"hi": "large-v3-turbo"}
     language_models: dict[str, str] = field(default_factory=dict)

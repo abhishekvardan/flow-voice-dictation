@@ -378,6 +378,13 @@ class SettingsWindow(QWidget):
             "Converts Hindi/Marathi output to Hinglish spelling (मैं सोचता हूँ -> main sochta hoon) "
             "by rules, with no model involved."))
 
+        self.streaming_stt = QCheckBox("Transcribe while I speak (shorter wait after long dictations)")
+        self.streaming_stt.setChecked(self.cfg.streaming_stt)
+        wform.addRow("", self.streaming_stt)
+        wform.addRow("", _hint(
+            "Pieces of speech between pauses are transcribed in the background, so releasing the "
+            "shortcut only has the last few seconds left to do."))
+
         self.whisper_status = QLabel()
         wform.addRow("Status", self.whisper_status)
         layout.addWidget(whisper)
@@ -1106,6 +1113,7 @@ class SettingsWindow(QWidget):
         cfg.whisper_device = self.whisper_device.currentText()
         cfg.whisper_compute_type = self.compute_type.currentText()
         cfg.language = self.language.currentText().strip() or "auto"
+        cfg.streaming_stt = self.streaming_stt.isChecked()
         cfg.language_models = self._collect_language_models()
         cfg.romanize_languages = self.romanize_languages.text().strip()
         cfg.cleanup_enabled = self.cleanup_enabled.isChecked()

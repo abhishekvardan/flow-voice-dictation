@@ -30,6 +30,7 @@ from . import languages
 from .inserter import Inserter
 from .llm import OllamaClient, OllamaError, is_local_url
 from .pipeline import process
+from .stream import StreamingTranscriber
 from .stt import Transcriber, model_for_language
 from .timing import Timeline
 from .ui.icons import mic_icon
@@ -54,6 +55,7 @@ class Session:
     started: float = field(default_factory=time.monotonic)
     revealed: bool = False
     timeline: Timeline = field(default_factory=Timeline)
+    streamer: object | None = None
 
 
 class Signals(QObject):
@@ -252,6 +254,8 @@ class FlowApp(QObject):
     # Recording ----------------------------------------------------------------------------------
     def _on_start(self, mode: str, handsfree: bool) -> None:
         if self._session is not None:
+            if self._session.streamer is not None:
+                self._session.streamer.cancel()
             self.recorder.cancel()
         self._session_counter += 1
         timeline = Timeline()
@@ -269,6 +273,10 @@ class FlowApp(QObject):
             return
         self._session = session
         self._limit_timer.start()
+        if self.cfg.streaming_stt and self.transcriber.ready:
+            session.streamer = StreamingTranscriber(
+                self.transcriber, self.cfg, self.dictionary.vocabulary(), self.recorder)
+            session.streamer.start()
         if session.ctx.elevated and not is_elevated():
             self._warn("That window runs as administrator, so Windows will block Flow from typing "
                        "into it. Start Flow as administrator to dictate there.")
@@ -343,6 +351,8 @@ class FlowApp(QObject):
     def _on_cancel(self, was_tap: bool) -> None:
         session, self._session = self._session, None
         self._limit_timer.stop()
+        if session is not None and session.streamer is not None:
+            session.streamer.cancel()
         self.recorder.cancel()
         if session is not None and session.revealed and not was_tap:
             self.overlay.show_message("Cancelled", error=False, ms=900)
@@ -378,10 +388,18 @@ class FlowApp(QObject):
         timeline.mark("job_start")
         ctx = session.ctx
         try:
+            transcript = None
+            streamer = session.streamer
+            if streamer is not None:
+                timeline.mark("stt_start")
+                transcript = streamer.finish()
+                timeline.mark("stt_done")
+                timeline.info["Streamed"] = (f"{streamer.chunks} chunk(s), "
+                                             f"{streamer.seconds_ahead:.1f}s transcribed while speaking")
             result = process(
                 audio, mode=session.mode, ctx=ctx, cfg=cfg, transcriber=self.transcriber, llm=self.llm,
                 dictionary=self.dictionary, capture_selection=self.inserter.capture_selection,
-                timeline=timeline, skills=self.skills,
+                timeline=timeline, skills=self.skills, transcript=transcript,
             )
             log.info("Transcribed %.1fs audio in %.0f ms: %r", duration, timeline.ms("stt_start", "stt_done") or 0, result.raw)
             if result.empty:

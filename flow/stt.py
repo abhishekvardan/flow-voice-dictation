@@ -188,7 +188,7 @@ class Transcriber:
             self._loaded.pop(key)
 
     def transcribe(self, audio: np.ndarray, cfg: Config, vocabulary: list[str],
-                   timeline=None) -> tuple[str, str]:
+                   timeline=None, language: str | None = None) -> tuple[str, str]:
         """Returns (text, detected language code)."""
         wanted = model_for_language(cfg)
         if self._current is None or self._current.name != resolve_model_name(wanted, self.device):
@@ -208,7 +208,7 @@ class Transcriber:
             # the returned generator then decodes segment by segment.
             segments, info = entry.model.transcribe(
                 audio,
-                language=None if cfg.language in ("", "auto") else cfg.language,
+                language=language or (None if cfg.language in ("", "auto") else cfg.language),
                 beam_size=beam_size,
                 vad_filter=True,
                 vad_parameters={"min_silence_duration_ms": 700},

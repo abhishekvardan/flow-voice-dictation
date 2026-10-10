@@ -88,6 +88,28 @@ class Recorder:
             seconds = len(mono) / self._rate
             self.silence_seconds = 0.0 if level > 0.012 else self.silence_seconds + seconds
 
+    @property
+    def frame_count(self) -> int:
+        """Frames captured so far, at 16 kHz (what the streaming transcriber counts in)."""
+        with self._lock:
+            frames = self._frames
+        return int(frames * SAMPLE_RATE / self._rate) if self._rate != SAMPLE_RATE else frames
+
+    def snapshot_from(self, frame: int) -> np.ndarray:
+        """Audio from `frame` (16 kHz index) to now, without interrupting the recording."""
+        with self._lock:
+            if not self._chunks:
+                return np.zeros(0, np.float32)
+            audio = np.concatenate(self._chunks)
+        audio = self._to_16k(audio)
+        return audio[max(0, frame):]
+
+    def _to_16k(self, audio: np.ndarray) -> np.ndarray:
+        if self._rate == SAMPLE_RATE or not len(audio):
+            return audio
+        n = int(len(audio) * SAMPLE_RATE / self._rate)
+        return np.interp(np.linspace(0, len(audio) - 1, n), np.arange(len(audio)), audio).astype(np.float32)
+
     def stop(self, timeline=None) -> np.ndarray:
         """Stops recording and returns 16 kHz mono float32 audio."""
         self._close()
@@ -97,12 +119,7 @@ class Recorder:
         with self._lock:
             audio = np.concatenate(self._chunks) if self._chunks else np.zeros(0, np.float32)
             self._chunks = []
-        if self._rate != SAMPLE_RATE and len(audio):
-            n = int(len(audio) * SAMPLE_RATE / self._rate)
-            audio = np.interp(
-                np.linspace(0, len(audio) - 1, n), np.arange(len(audio)), audio
-            ).astype(np.float32)
-        return audio
+        return self._to_16k(audio)
 
     def cancel(self) -> None:
         self._close()

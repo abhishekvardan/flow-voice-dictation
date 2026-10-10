@@ -16,6 +16,7 @@ Everything runs on your machine: **faster-whisper** turns speech into text and *
 - **History**: searchable, with words dictated and words per minute. Recent dictations are also in the tray menu.
 - **Floating bubble**: shows a live waveform, processing dots, and errors. It never takes focus away from your app.
 - All shortcuts are configurable, including single keys like `F8` or side-specific keys like `Right Alt`.
+- **Transcribes while you speak**: pieces of speech between pauses are transcribed in the background, so releasing the shortcut leaves only the tail to do. Measured on a 23 s dictation: the wait after release dropped from **1,329 ms to 247 ms**, with word-identical text.
 - **Rules-based cleanup** (no model): fillers, stutters, spacing, capitalization and spoken punctuation are fixed by rules on every dictation. This is also what gets inserted whenever AI cleanup is unavailable, skipped or rejected, so you never get a raw, unpunctuated dump.
 - **Last dictation panel** (`Ctrl + Win + E`): review and edit the result, switch between the exact transcript / rules version / AI version, clean it again with a different style, or insert it again.
 - **Voice skills**: say a saved name and then speak - "commit message: fixed the login redirect bug" or "bug report: ...". Ships with commit message, bug report, prompt and email reply; add your own.
@@ -60,6 +61,22 @@ The first launch downloads the Whisper model (`small` is about 500 MB) to `%APPD
 | `base` | ok | ~0.3 GB |
 | `small` (default) | good | ~0.6 GB |
 | `large-v3-turbo` | best | ~1.6 GB |
+
+### Measured latency (RTX 3050, Whisper small, llama3.2 3B)
+
+Time from releasing the shortcut to text appearing, median of 5 runs:
+
+| Speech | v1 | after profiling | with streaming |
+| --- | --- | --- | --- |
+| 2.4 s | 3,304 ms | 688 ms | ~560 ms |
+| 6.4 s | 4,723 ms | 1,324 ms | ~1,250 ms |
+| 16.9 s | 7,975 ms | 2,210 ms | ~1,550 ms |
+| 22.6 s (with pauses) | — | ~3,500 ms | ~2,400 ms |
+
+The big early win was connecting to `127.0.0.1` instead of `localhost`: on Windows the latter tries
+IPv6 first and Ollama only listens on IPv4, which cost 2.1 s per request. Streaming removes most of
+what is left of speech recognition; the remainder is AI cleanup, which scales with how much you said.
+Run `uv run python bench/benchmark.py --label mine` to measure your own machine.
 
 `llama3.2` (3B) uses about 2.5 GB, so `small` plus `llama3.2` fits on a 4 GB card. If Whisper can't use CUDA,
 it falls back to the CPU automatically; the tray menu shows which device is in use.

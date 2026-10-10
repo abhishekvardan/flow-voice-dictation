@@ -54,11 +54,17 @@ def process(
     capture_selection: Callable[[], str],
     timeline: Timeline,
     skills: Skills | None = None,
+    transcript: tuple[str, str] | None = None,
 ) -> Result:
     """Everything up to (not including) inserting the text. Raises OllamaError in command mode."""
     vocabulary = dictionary.vocabulary()
     replacements = dictionary.replacements()
-    raw, language = transcriber.transcribe(audio, cfg, vocabulary, timeline=timeline)
+    if transcript is not None:
+        # Already transcribed while the user was speaking (see stream.py); the caller timed the
+        # tail it still had to finish, so the breakdown keeps reporting real STT time.
+        raw, language = transcript
+    else:
+        raw, language = transcriber.transcribe(audio, cfg, vocabulary, timeline=timeline)
     timeline.mark("post_start")
     raw = apply_replacements(raw, replacements).strip()
     result = Result(raw=raw, language=language)
