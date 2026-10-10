@@ -74,12 +74,16 @@ class StreamingTranscriber:
     def cancel(self) -> None:
         self._stop.set()
 
-    def finish(self, timeout: float = 30.0) -> tuple[str, str]:
-        """Transcribes whatever is left and returns (text, language)."""
+    def finish(self, audio: np.ndarray | None = None, timeout: float = 30.0) -> tuple[str, str]:
+        """Transcribes whatever is left and returns (text, language).
+
+        Pass the finished recording: the Recorder empties its buffer when it stops, so reading the
+        tail from the source afterwards would find nothing.
+        """
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout)
-        tail = self._source.snapshot_from(self._cursor)
+        tail = audio[self._cursor:] if audio is not None else self._source.snapshot_from(self._cursor)
         if len(tail) > 0.25 * 16000:
             text, language = self._transcribe(tail)
             if text:

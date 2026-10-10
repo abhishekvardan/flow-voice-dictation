@@ -105,3 +105,34 @@ def test_cancel_stops_without_transcribing_more():
     source.pause(CUT_SILENCE + 0.2)
     time.sleep(0.3)
     assert fake.calls == []
+
+
+def test_short_dictation_still_transcribes_after_the_recorder_is_emptied():
+    """The Recorder clears its buffer in stop(), before the job runs: the tail must come from the
+    finished recording, or a short dictation produces nothing ("No speech detected")."""
+    source, fake = FakeSource(), FakeTranscriber()
+    streamer = StreamingTranscriber(fake, Config(), [], source)
+    streamer.start()
+    source.speak(1.5)                   # too short to stream anything
+    final_audio = source.audio.copy()   # what Recorder.stop() returns
+    source.audio = np.zeros(0, np.float32)  # ... and then the buffer is empty
+
+    text, _ = streamer.finish(final_audio)
+    assert text == "chunk1"
+    assert fake.calls == [1.5]
+
+
+def test_streamed_prefix_plus_tail_after_the_recorder_is_emptied():
+    source, fake = FakeSource(), FakeTranscriber()
+    streamer = StreamingTranscriber(fake, Config(), [], source)
+    streamer.start()
+    source.speak(4.0)
+    source.pause(CUT_SILENCE + 0.1)
+    assert run_until(lambda: streamer.chunks == 1)
+    source.speak(2.0)
+    final_audio = source.audio.copy()
+    source.audio = np.zeros(0, np.float32)
+
+    text, _ = streamer.finish(final_audio)
+    assert text == "chunk1 chunk2"
+    assert fake.calls[1] < 3.0  # only the tail

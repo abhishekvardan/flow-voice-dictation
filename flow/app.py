@@ -392,7 +392,7 @@ class FlowApp(QObject):
             streamer = session.streamer
             if streamer is not None:
                 timeline.mark("stt_start")
-                transcript = streamer.finish()
+                transcript = streamer.finish(audio)
                 timeline.mark("stt_done")
                 timeline.info["Streamed"] = (f"{streamer.chunks} chunk(s), "
                                              f"{streamer.seconds_ahead:.1f}s transcribed while speaking")
