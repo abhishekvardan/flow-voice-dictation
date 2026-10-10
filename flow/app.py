@@ -24,6 +24,7 @@ from .context import WindowContext, active_window
 from .db import Database
 from .dictionary import Dictionary
 from .history import History
+from .skills import Skills
 from .hotkeys import HotkeyEngine
 from . import languages
 from .inserter import Inserter
@@ -76,6 +77,7 @@ class FlowApp(QObject):
         self.db = Database(data_dir() / "flow.db")
         self.dictionary = Dictionary(self.db)
         self.history = History(self.db)
+        self.skills = Skills(self.db)
         self.history.prune(self.cfg.history_retention_days)
 
         self.recorder = Recorder()
@@ -338,8 +340,17 @@ class FlowApp(QObject):
         self._on_cancel(False)
 
     def _check_limit(self) -> None:
-        if self._session is not None and self.recorder.limit_reached:
+        session = self._session
+        if session is None:
+            return
+        if self.recorder.limit_reached:
             log.info("Recording limit reached; stopping")
+            self._ui_stop()
+            return
+        quiet = self.cfg.auto_stop_silence
+        if (session.handsfree and quiet > 0 and session.revealed
+                and self.recorder.silence_seconds >= quiet):
+            log.info("Stopping hands-free recording after %.1fs of silence", self.recorder.silence_seconds)
             self._ui_stop()
 
     # Processing (worker thread) -----------------------------------------------------------------
@@ -351,7 +362,7 @@ class FlowApp(QObject):
             result = process(
                 audio, mode=session.mode, ctx=ctx, cfg=cfg, transcriber=self.transcriber, llm=self.llm,
                 dictionary=self.dictionary, capture_selection=self.inserter.capture_selection,
-                timeline=timeline,
+                timeline=timeline, skills=self.skills,
             )
             log.info("Transcribed %.1fs audio in %.0f ms: %r", duration, timeline.ms("stt_start", "stt_done") or 0, result.raw)
             if result.empty:
@@ -360,8 +371,14 @@ class FlowApp(QObject):
             llm_ms = timeline.ms("llm_start", "llm_done") or 0
             if result.llm_used:
                 self._last_llm_use = time.monotonic()
-            log.info("Inserting into %s (%s, llm %.0f ms): %r", ctx.process or "?", result.style, llm_ms, result.final)
-            self.inserter.insert(result.final, cfg.paste_mode, timeline=timeline)
+            to_panel = session.mode == "command" and cfg.command_mode_output == "panel"
+            if to_panel:
+                log.info("Command result for %s (%s, llm %.0f ms) sent to the panel: %r",
+                         ctx.process or "?", result.style, llm_ms, result.final)
+            else:
+                log.info("Inserting into %s (%s, llm %.0f ms): %r",
+                         ctx.process or "?", result.style, llm_ms, result.final)
+                self.inserter.insert(result.final, cfg.paste_mode, timeline=timeline)
             log.info("Latency breakdown (%s, %s):\n%s", session.mode, result.style, timeline.report())
             if cfg.history_enabled:
                 self.history.add(
@@ -375,7 +392,7 @@ class FlowApp(QObject):
                 "hwnd": ctx.hwnd, "llm_rejected": result.llm_rejected, "timing": timeline.compact(),
             }
             self.signals.job_done.emit({"final": result.final, "warning": result.warning,
-                                        "timing": timeline.compact()})
+                                        "timing": timeline.compact(), "panel": to_panel})
         except OllamaError as exc:
             self.signals.job_failed.emit(str(exc))
         except Exception as exc:
@@ -384,6 +401,8 @@ class FlowApp(QObject):
 
     def _on_job_done(self, result: dict) -> None:
         self._pending_jobs = max(0, self._pending_jobs - 1)
+        if result.get("panel"):
+            self.open_fixup()
         if result.get("warning"):
             self._warn(result["warning"])
             if self._session is None:

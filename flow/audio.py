@@ -44,6 +44,7 @@ class Recorder:
         self._max_frames = 0
         self.level = 0.0
         self.limit_reached = False
+        self.silence_seconds = 0.0
 
     @property
     def active(self) -> bool:
@@ -52,6 +53,7 @@ class Recorder:
     def start(self, device: str = "", max_seconds: int = 360) -> None:
         self.cancel()
         self._chunks, self._frames, self.level, self.limit_reached = [], 0, 0.0, False
+        self.silence_seconds = 0.0
         dev = device or None
         try:
             stream = self._open(dev, SAMPLE_RATE)
@@ -80,7 +82,11 @@ class Recorder:
                 return
             self._chunks.append(mono)
             self._frames += len(mono)
-        self.level = float(np.sqrt(np.mean(mono * mono))) if len(mono) else 0.0
+        level = float(np.sqrt(np.mean(mono * mono))) if len(mono) else 0.0
+        self.level = level
+        if len(mono):
+            seconds = len(mono) / self._rate
+            self.silence_seconds = 0.0 if level > 0.012 else self.silence_seconds + seconds
 
     def stop(self, timeline=None) -> np.ndarray:
         """Stops recording and returns 16 kHz mono float32 audio."""

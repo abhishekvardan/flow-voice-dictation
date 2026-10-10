@@ -59,6 +59,8 @@ class Config:
     ollama_model: str = "llama3.2"
     cleanup_enabled: bool = True
     spoken_punctuation: bool = True  # turn "comma" / "new paragraph" into symbols without the LLM
+    command_mode_output: str = "replace"  # replace | panel (show the result instead of pasting)
+    auto_stop_silence: float = 0.0  # hands-free: stop after this many seconds of silence (0 = off)
     llm_timeout: float = 20.0
 
     # Styles

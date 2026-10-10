@@ -9,9 +9,10 @@ from datetime import datetime
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView,
-    QLabel, QLineEdit, QListWidget, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox,
-    QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMessageBox, QPlainTextEdit,
+    QProgressBar, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
+    QWidget,
 )
 
 from ..audio import input_devices
@@ -70,6 +71,7 @@ def _style_combo(value: str) -> QComboBox:
 class SettingsWindow(QWidget):
     _models_loaded = Signal(list, str)
     _download_done = Signal(str)
+    _vocab_imported = Signal(str)
     _test_finished = Signal(str)
 
     def __init__(self, app):
@@ -86,6 +88,8 @@ class SettingsWindow(QWidget):
         self._download_done.connect(self._on_download_done)
         self._download_timer = QTimer(self)
         self._download_timer.timeout.connect(self._poll_download)
+        self._meter_timer = QTimer(self)
+        self._meter_timer.timeout.connect(self._update_meter)
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._general_tab(), "General")
@@ -94,6 +98,7 @@ class SettingsWindow(QWidget):
         self.tabs.addTab(self._styles_tab(), "Styles")
         self.tabs.addTab(self._dictionary_tab(), "Dictionary")
         self.tabs.addTab(self._snippets_tab(), "Snippets")
+        self.tabs.addTab(self._skills_tab(), "Skills")
         self.tabs.addTab(self._history_tab(), "History")
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
@@ -140,6 +145,31 @@ class SettingsWindow(QWidget):
         self.sounds = QCheckBox("Play sounds when recording starts and stops")
         self.sounds.setChecked(self.cfg.sounds)
         form.addRow("", self.sounds)
+
+        meter_row = QHBoxLayout()
+        self.mic_meter = QProgressBar()
+        self.mic_meter.setRange(0, 100)
+        self.mic_meter.setTextVisible(False)
+        self.mic_test = QPushButton("Test microphone")
+        self.mic_test.setCheckable(True)
+        self.mic_test.toggled.connect(self._toggle_mic_test)
+        meter_row.addWidget(self.mic_meter, 1)
+        meter_row.addWidget(self.mic_test)
+        form.addRow("Input level", meter_row)
+
+        self.auto_stop_silence = QDoubleSpinBox()
+        self.auto_stop_silence.setRange(0.0, 30.0)
+        self.auto_stop_silence.setSingleStep(0.5)
+        self.auto_stop_silence.setSuffix(" s")
+        self.auto_stop_silence.setSpecialValueText("Off")
+        self.auto_stop_silence.setValue(self.cfg.auto_stop_silence)
+        form.addRow("Hands-free: stop after silence", self.auto_stop_silence)
+
+        self.command_mode_output = QComboBox()
+        self.command_mode_output.addItem("Replace the selected text", "replace")
+        self.command_mode_output.addItem("Show it in the last-dictation panel", "panel")
+        _select_combo(self.command_mode_output, self.cfg.command_mode_output, data=True)
+        form.addRow("Command mode result", self.command_mode_output)
 
         self.max_seconds = QSpinBox()
         self.max_seconds.setRange(30, 1800)
@@ -202,6 +232,32 @@ class SettingsWindow(QWidget):
         layout.addLayout(row)
         layout.addStretch()
         return page
+
+    def _toggle_mic_test(self, on: bool) -> None:
+        """Live input level, so a dead or muted microphone is obvious before dictating."""
+        if on:
+            if self.app.recorder.active:
+                self.mic_test.setChecked(False)
+                return
+            try:
+                self.app.recorder.start(self.mic.currentData(), 60)
+            except Exception as exc:
+                self.mic_test.setChecked(False)
+                self.mic_meter.setFormat(str(exc))
+                return
+            self._meter_timer.start(50)
+            self.mic_test.setText("Stop test")
+        else:
+            self._meter_timer.stop()
+            self.app.recorder.cancel()
+            self.mic_meter.setValue(0)
+            self.mic_test.setText("Test microphone")
+
+    def _update_meter(self) -> None:
+        import math
+
+        level = self.app.recorder.level
+        self.mic_meter.setValue(int(min(1.0, math.sqrt(level) * 2.6) * 100))
 
     def _reset_shortcuts(self) -> None:
         defaults = Config()
@@ -591,6 +647,42 @@ class SettingsWindow(QWidget):
                 dictionary.remove_word(item.text())
             refresh_vocab()
 
+        import_row = QHBoxLayout()
+        import_button = QPushButton("Import from a project folder…")
+        self.vocab_status = QLabel()
+        self.vocab_status.setProperty("hint", True)
+        import_row.addWidget(import_button)
+        import_row.addWidget(self.vocab_status, 1)
+        vlayout.addLayout(import_row)
+
+        def import_project():
+            folder = QFileDialog.getExistingDirectory(self, "Pick a code folder")
+            if not folder:
+                return
+            self.vocab_status.setText("Scanning…")
+            import_button.setEnabled(False)
+
+            def work():
+                from ..codewords import harvest_vocabulary
+
+                try:
+                    words = harvest_vocabulary(folder)
+                    for word in words:
+                        dictionary.add_word(word)
+                    self._vocab_imported.emit(f"Added {len(words)} names from {folder}.")
+                except Exception as exc:
+                    self._vocab_imported.emit(f"Import failed: {exc}")
+
+            threading.Thread(target=work, daemon=True, name="flow-vocab-import").start()
+
+        def imported(message):
+            import_button.setEnabled(True)
+            self.vocab_status.setText(message)
+            refresh_vocab()
+
+        import_button.clicked.connect(import_project)
+        self._vocab_imported.connect(imported)
+
         add.clicked.connect(add_word)
         self.vocab_input.returnPressed.connect(add_word)
         remove.clicked.connect(remove_words)
@@ -729,6 +821,82 @@ class SettingsWindow(QWidget):
         refresh()
         return page
 
+    # Skills -------------------------------------------------------------------------------------
+    def _skills_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        skills = self.app.skills
+        layout.addWidget(_hint(
+            'Say a skill name, then what you want: "commit message: fixed the login redirect bug". '
+            "The instruction below reshapes that dictation. Skills use the AI model, so they need Ollama."))
+        self.skill_table = QTableWidget(0, 2)
+        self.skill_table.setHorizontalHeaderLabels(["Say this", "Instruction"])
+        self.skill_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.skill_table.setColumnWidth(0, 180)
+        self.skill_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.skill_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.skill_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.skill_table.verticalHeader().setVisible(False)
+        layout.addWidget(self.skill_table, 1)
+
+        self.skill_name = QLineEdit()
+        self.skill_name.setPlaceholderText("Skill name, e.g. commit message")
+        self.skill_instruction = QPlainTextEdit()
+        self.skill_instruction.setPlaceholderText("What should Flow do with the dictation?")
+        self.skill_instruction.setMaximumHeight(110)
+        layout.addWidget(self.skill_name)
+        layout.addWidget(self.skill_instruction)
+
+        row = QHBoxLayout()
+        save = QPushButton("Save skill")
+        new = QPushButton("New")
+        remove = QPushButton("Remove selected")
+        for button in (save, new, remove):
+            row.addWidget(button)
+        row.addStretch()
+        layout.addLayout(row)
+
+        def refresh():
+            items = skills.all()
+            self.skill_table.setRowCount(len(items))
+            for i, skill in enumerate(items):
+                name = QTableWidgetItem(skill.name)
+                name.setData(Qt.UserRole, skill.id)
+                name.setData(Qt.UserRole + 1, skill.instruction)
+                self.skill_table.setItem(i, 0, name)
+                self.skill_table.setItem(i, 1, QTableWidgetItem(skill.instruction.replace("\n", " ")))
+
+        def on_select():
+            items = self.skill_table.selectedItems()
+            if items:
+                first = self.skill_table.item(items[0].row(), 0)
+                self.skill_name.setText(first.text())
+                self.skill_instruction.setPlainText(first.data(Qt.UserRole + 1))
+
+        def save_skill():
+            skills.save(self.skill_name.text(), self.skill_instruction.toPlainText())
+            refresh()
+
+        def clear_editor():
+            self.skill_table.clearSelection()
+            self.skill_name.clear()
+            self.skill_instruction.clear()
+            self.skill_name.setFocus()
+
+        def remove_skill():
+            items = self.skill_table.selectedItems()
+            if items:
+                skills.remove(self.skill_table.item(items[0].row(), 0).data(Qt.UserRole))
+                clear_editor()
+                refresh()
+
+        self.skill_table.itemSelectionChanged.connect(on_select)
+        save.clicked.connect(save_skill)
+        new.clicked.connect(clear_editor)
+        remove.clicked.connect(remove_skill)
+        refresh()
+        return page
+
     # History ------------------------------------------------------------------------------------
     def _history_tab(self) -> QWidget:
         page = QWidget()
@@ -813,6 +981,8 @@ class SettingsWindow(QWidget):
         cfg.trailing_space = self.trailing_space.isChecked()
         cfg.sounds = self.sounds.isChecked()
         cfg.max_recording_seconds = self.max_seconds.value()
+        cfg.auto_stop_silence = float(self.auto_stop_silence.value())
+        cfg.command_mode_output = self.command_mode_output.currentData()
         cfg.history_enabled = self.history_enabled.isChecked()
         cfg.history_retention_days = self.retention.value()
         cfg.launch_at_login = self.launch_at_login.isChecked()
@@ -845,6 +1015,8 @@ class SettingsWindow(QWidget):
         self._saved_label.setText("Saved.")
 
     def closeEvent(self, event) -> None:
+        if self.mic_test.isChecked():
+            self.mic_test.setChecked(False)
         self.app.cancel_combo_capture()
         self._saved_label.setText("")
         super().closeEvent(event)

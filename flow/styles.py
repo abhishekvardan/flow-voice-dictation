@@ -21,6 +21,10 @@ BUILTIN_STYLES: dict[str, str] = {
         "'use state' -> useState, 'dot env' -> .env, 'npm run dev' stays as is). "
         "No period at the end of short phrases."
     ),
+    "prompt": (
+        "An instruction for a coding assistant. Keep every requirement the speaker stated, in their "
+        "order; spell code identifiers, file names and commands exactly; no greetings or filler."
+    ),
     # "none" means: skip the LLM and insert the raw transcript.
     "none": "",
 }
@@ -30,6 +34,7 @@ STYLE_LABELS: dict[str, str] = {
     "casual": "Casual",
     "very_casual": "Very casual",
     "code": "Code / technical",
+    "prompt": "AI prompt (for coding tools)",
     "none": "Raw (no AI cleanup)",
 }
 

@@ -279,6 +279,19 @@ class OllamaClient:
             return fallback if fallback is not None else raw
         return output
 
+    def run_skill(self, instruction: str, text: str, style: str, timeline=None,
+                  fallback: str | None = None) -> str:
+        """Reshapes a dictation with a saved skill instruction (commit message, bug report, ...)."""
+        from .skills import build_messages
+
+        options = {**OPTIONS, "num_predict": max(192, cleanup_token_limit(text))}
+        output = sanitize(self.chat(build_messages(instruction, text, style), timeline=timeline,
+                                    options=options))
+        if not output or _REFUSAL.match(output):
+            log.warning("Skill produced nothing usable: %r", output[:120])
+            return fallback if fallback is not None else text
+        return output
+
     def command(self, selection: str, instruction: str, timeline=None) -> str:
         return sanitize(self.chat(build_command_messages(selection, instruction),
                                   timeout=max(self.timeout, 60), timeline=timeline))

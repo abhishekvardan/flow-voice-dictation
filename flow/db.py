@@ -36,6 +36,13 @@ MIGRATIONS = [
     );
     CREATE INDEX history_created ON history(created_at);
     """,
+    """
+    CREATE TABLE skills (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        instruction TEXT NOT NULL
+    );
+    """,
 ]
 
 
