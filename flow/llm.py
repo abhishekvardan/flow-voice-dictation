@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+import socket
+from http.client import HTTPConnection
 from urllib.parse import urlsplit, urlunsplit
-
-import httpx
 
 from . import languages
 
@@ -213,21 +213,54 @@ class OllamaClient:
         self.url = normalize_url(url)
         self.model = model
         self.timeout = timeout
-        if not hasattr(self, "_http"):
-            self._http = httpx.Client()  # reuse the localhost connection between requests
+
+    def _request(self, path: str, payload: dict, timeout: float):
+        """Opens a POST and returns (connection, response). The caller must close the connection."""
+        parts = urlsplit(self.url)
+        body = json.dumps(payload).encode("utf-8")
+        connection = HTTPConnection(parts.hostname or "127.0.0.1", parts.port or 11434,
+                                    timeout=timeout)
+        try:
+            connection.request("POST", (parts.path or "") + path, body,
+                               {"Content-Type": "application/json", "Content-Length": str(len(body))})
+            response = connection.getresponse()
+        except (ConnectionError, OSError) as exc:
+            connection.close()
+            if isinstance(exc, socket.timeout):
+                raise OllamaError(f"Ollama timed out after {timeout:.0f}s") from exc
+            raise OllamaError(f"Ollama is not running at {self.url}") from exc
+        if response.status == 404:
+            connection.close()
+            raise OllamaError(f"Model '{self.model}' not found. Run: ollama pull {self.model}")
+        if response.status >= 400:
+            detail = response.read(400).decode("utf-8", "replace")
+            connection.close()
+            raise OllamaError(f"Ollama error {response.status}: {detail}")
+        return connection, response
 
     def _post(self, path: str, payload: dict, timeout: float) -> dict:
+        connection, response = self._request(path, payload, timeout)
         try:
-            response = httpx.post(f"{self.url}{path}", json=payload, timeout=timeout)
-        except httpx.ConnectError as exc:
-            raise OllamaError(f"Ollama is not running at {self.url}") from exc
-        except httpx.TimeoutException as exc:
+            data = response.read()
+        except (OSError, socket.timeout) as exc:
             raise OllamaError(f"Ollama timed out after {timeout:.0f}s") from exc
-        if response.status_code == 404:
-            raise OllamaError(f"Model '{self.model}' not found. Run: ollama pull {self.model}")
-        if response.status_code >= 400:
-            raise OllamaError(f"Ollama error {response.status_code}: {response.text[:200]}")
-        return response.json()
+        finally:
+            connection.close()
+        return json.loads(data or b"{}")
+
+    def _get(self, path: str, timeout: float = 5) -> dict:
+        parts = urlsplit(self.url)
+        connection = HTTPConnection(parts.hostname or "127.0.0.1", parts.port or 11434, timeout=timeout)
+        try:
+            connection.request("GET", (parts.path or "") + path)
+            response = connection.getresponse()
+            if response.status >= 400:
+                raise OllamaError(f"Ollama error {response.status} from {path}")
+            return json.loads(response.read() or b"{}")
+        except (ConnectionError, OSError) as exc:
+            raise OllamaError(f"Ollama is not reachable at {self.url}") from exc
+        finally:
+            connection.close()
 
     def chat(self, messages: list[dict], timeout: float | None = None, timeline=None,
              options: dict | None = None) -> str:
@@ -244,31 +277,30 @@ class OllamaClient:
         final: dict = {}
         if timeline is not None:
             timeline.mark("llm_start")
+        connection, response = self._request("/api/chat", payload, timeout)
         try:
-            with self._http.stream("POST", f"{self.url}/api/chat", json=payload, timeout=timeout) as response:
-                if response.status_code == 404:
-                    raise OllamaError(f"Model '{self.model}' not found. Run: ollama pull {self.model}")
-                if response.status_code >= 400:
-                    response.read()
-                    raise OllamaError(f"Ollama error {response.status_code}: {response.text[:200]}")
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    chunk = json.loads(line)
-                    if chunk.get("error"):
-                        raise OllamaError(f"Ollama error: {chunk['error']}")
-                    piece = chunk.get("message", {}).get("content", "")
-                    if piece:
-                        if not parts and timeline is not None:
-                            timeline.mark("llm_first_token")
-                        parts.append(piece)
-                    if chunk.get("done"):
-                        final = chunk
-                        break
-        except httpx.ConnectError as exc:
-            raise OllamaError(f"Ollama is not running at {self.url}") from exc
-        except httpx.TimeoutException as exc:
+            # Ollama streams newline-delimited JSON, one object per token batch.
+            for line in response:
+                line = line.strip()
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                if chunk.get("error"):
+                    raise OllamaError(f"Ollama error: {chunk['error']}")
+                piece = chunk.get("message", {}).get("content", "")
+                if piece:
+                    if not parts and timeline is not None:
+                        timeline.mark("llm_first_token")
+                    parts.append(piece)
+                if chunk.get("done"):
+                    final = chunk
+                    break
+        except socket.timeout as exc:
             raise OllamaError(f"Ollama timed out after {timeout:.0f}s") from exc
+        except OSError as exc:
+            raise OllamaError(f"Lost the connection to Ollama: {exc}") from exc
+        finally:
+            connection.close()
         if timeline is not None:
             timeline.mark("llm_done")
             timeline.info.update(server_stats(final))
@@ -307,12 +339,7 @@ class OllamaClient:
         return sorted(model["name"] for model in self.model_details())
 
     def model_details(self) -> list[dict]:
-        try:
-            response = httpx.get(f"{self.url}/api/tags", timeout=5)
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise OllamaError(f"Ollama is not reachable at {self.url}") from exc
-        return response.json().get("models", [])
+        return self._get("/api/tags").get("models", [])
 
     def is_cloud_pointer(self, name: str | None = None) -> bool:
         """True for an Ollama entry that only points at a remote model.

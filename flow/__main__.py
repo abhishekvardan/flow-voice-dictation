@@ -20,7 +20,7 @@ def _setup_logging() -> None:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         handlers=handlers,
     )
-    for noisy in ("httpx", "httpcore", "faster_whisper", "urllib3", "huggingface_hub"):
+    for noisy in ("faster_whisper", "urllib3", "huggingface_hub"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 

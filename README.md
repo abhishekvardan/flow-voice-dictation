@@ -94,8 +94,27 @@ uv sync --extra build
 uv run pyinstaller packaging/flow.spec --noconfirm
 ```
 
-The result is `dist/Flow/Flow.exe`, which runs without uv or Python. Whisper models are not
-bundled; they download to `%APPDATA%\Flow\models` on first use.
+The result is `dist/Flow/Flow.exe`, which runs without uv or Python (about 330 MB). Whisper models
+are not bundled; they download to `%APPDATA%\Flow\models` on first use.
+
+The packaged build runs Whisper on the **CPU** by default, because the CUDA runtime from the
+`nvidia-*` wheels adds ~1.2 GB. To ship GPU support inside the exe:
+
+```powershell
+$env:FLOW_BUNDLE_CUDA = "1"; uv run pyinstaller packaging/flow.spec --noconfirm
+```
+
+Two things that bite when packaging on Windows, both handled in `packaging/flow.spec` and `run.pyw`:
+
+- PyInstaller resolves dependent DLLs through `PATH`, so another OpenSSL on the machine gets
+  bundled instead of the one Python was built against (Git for Windows ships 3.2, this Python
+  needs 3.5) and `import ssl` then fails with "the specified procedure could not be found".
+  The spec adds the right DLLs first, and `run.pyw` loads them by absolute path before anything
+  imports `ssl`.
+- The build needs ~2 GB of free disk space. Use `--distpath`/`--workpath` on a roomy drive.
+
+A startup failure in a windowed build has no console, so `run.pyw` appends the traceback to
+`%APPDATA%\Flow\crash.log`; set `FLOW_STARTUP_LOG=1` for DLL diagnostics in `startup.log`.
 
 Code map: `flow/hotkeys.py` (shortcut state machine), `flow/winkeys.py` (low-level keyboard hook and SendInput),
 `flow/audio.py`, `flow/stt.py`, `flow/llm.py`, `flow/inserter.py`, `flow/app.py` (wiring), `flow/ui/` (bubble, settings).
