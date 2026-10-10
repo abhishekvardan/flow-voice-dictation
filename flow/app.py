@@ -29,10 +29,11 @@ from . import languages
 from .inserter import Inserter
 from .llm import OllamaClient, OllamaError
 from .pipeline import process
-from .stt import Transcriber
+from .stt import Transcriber, model_for_language
 from .timing import Timeline
 from .ui.icons import mic_icon
 from .ui.overlay import Overlay
+from . import winkeys
 from .winkeys import KeyboardHook, run_on_hook_capture
 
 log = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ class Signals(QObject):
     job_failed = Signal(str)
     status_changed = Signal()
     combo_captured = Signal(str)
+    action = Signal(str)
     warning = Signal(str)
 
 
@@ -96,6 +98,8 @@ class FlowApp(QObject):
         self._last_llm_use = 0.0
         self._warming = False
         self.settings_window = None
+        self.fixup_panel = None
+        self.last: dict = {}
 
         self.signals = Signals()
         s = self.signals
@@ -108,12 +112,14 @@ class FlowApp(QObject):
         s.status_changed.connect(self._refresh_tray)
         s.combo_captured.connect(self._on_combo_captured)
         s.warning.connect(self._show_warning)
+        s.action.connect(self._on_action)
 
         self.engine = HotkeyEngine(
             on_start=s.hk_start.emit,
             on_stop=s.hk_stop.emit,
             on_cancel=s.hk_cancel.emit,
             on_mode_change=s.hk_mode.emit,
+            on_action=s.action.emit,
         )
         self._apply_hotkeys()
         self.hook = KeyboardHook(self.engine)
@@ -145,7 +151,7 @@ class FlowApp(QObject):
         self.qapp.quit()
 
     def _load_whisper(self) -> None:
-        self.whisper_status = f"Speech model: loading {self.cfg.whisper_model}…"
+        self.whisper_status = f"Speech model: loading {model_for_language(self.cfg)}…"
         self.signals.status_changed.emit()
         try:
             info = self.transcriber.load(self.cfg)
@@ -179,6 +185,7 @@ class FlowApp(QObject):
         self.engine.configure(
             self.cfg.hotkey_dictate, self.cfg.hotkey_handsfree, self.cfg.hotkey_command,
             self.cfg.double_tap_handsfree,
+            actions={"fixup": self.cfg.hotkey_fixup},
         )
 
     def apply_config(self, new: Config) -> None:
@@ -193,8 +200,10 @@ class FlowApp(QObject):
             action.setChecked(code == new.language)
         self.debug_latency = new.debug_latency or os.environ.get("FLOW_DEBUG") == "1"
         self.llm.configure(new.ollama_url, new.ollama_model, new.llm_timeout)
-        if (old.whisper_model, old.whisper_device, old.whisper_compute_type) != (
-            new.whisper_model, new.whisper_device, new.whisper_compute_type
+        if (old.whisper_model, old.whisper_device, old.whisper_compute_type, old.language,
+                str(old.language_models)) != (
+            new.whisper_model, new.whisper_device, new.whisper_compute_type, new.language,
+            str(new.language_models)
         ):
             threading.Thread(target=self._load_whisper, daemon=True).start()
         if (old.ollama_url, old.ollama_model) != (new.ollama_url, new.ollama_model):
@@ -360,6 +369,11 @@ class FlowApp(QObject):
                     final=result.final.rstrip(), duration=duration,
                     stt_ms=int(timeline.ms("stt_start", "stt_done") or 0), llm_ms=int(llm_ms),
                 )
+            self.last = {
+                "raw": result.raw, "tidied": result.tidied, "final": result.final.rstrip(),
+                "style": result.style, "language": result.language, "app": ctx.process,
+                "hwnd": ctx.hwnd, "llm_rejected": result.llm_rejected, "timing": timeline.compact(),
+            }
             self.signals.job_done.emit({"final": result.final, "warning": result.warning,
                                         "timing": timeline.compact()})
         except OllamaError as exc:
@@ -429,6 +443,7 @@ class FlowApp(QObject):
         menu.addAction(self._pause_action)
         self._recent_menu = menu.addMenu("Recent dictations")
         self._recent_menu.aboutToShow.connect(self._fill_recent)
+        menu.addAction("Last dictation…", self.open_fixup)
         menu.addAction("Settings…", self.open_settings)
         menu.addSeparator()
         menu.addAction("Quit Flow", self.quit)
@@ -506,6 +521,34 @@ class FlowApp(QObject):
         log.warning(message)
         if QSystemTrayIcon.supportsMessages():
             self.tray.showMessage("Flow", message, QSystemTrayIcon.Warning, 6000)
+
+    def _on_action(self, name: str) -> None:
+        if name == "fixup":
+            self.open_fixup()
+
+    def open_fixup(self) -> None:
+        from .ui.fixup import FixupPanel
+
+        if self.fixup_panel is None:
+            self.fixup_panel = FixupPanel(self)
+        self.fixup_panel.refresh()
+        self.fixup_panel.show()
+        self.fixup_panel.raise_()
+        self.fixup_panel.activateWindow()
+
+    def insert_into_previous_window(self, text: str, hwnd: int) -> None:
+        """Gives focus back to the app you dictated into, then pastes."""
+        def work() -> None:
+            try:
+                if hwnd:
+                    winkeys.focus_window(hwnd)
+                    time.sleep(0.15)
+                self.inserter.insert(text, self.cfg.paste_mode)
+            except Exception as exc:
+                log.exception("Could not insert from the fix-up panel")
+                self.signals.job_failed.emit(f"Could not insert: {exc}")
+
+        threading.Thread(target=work, daemon=True, name="flow-fixup-insert").start()
 
     def open_settings(self) -> None:
         from .ui.settings import SettingsWindow

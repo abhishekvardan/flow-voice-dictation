@@ -31,6 +31,7 @@ class Config:
     hotkey_dictate: str = "ctrl+windows"
     hotkey_handsfree: str = "ctrl+windows+space"
     hotkey_command: str = "ctrl+windows+alt"
+    hotkey_fixup: str = "ctrl+windows+e"  # open the last dictation to review, edit or re-run
     double_tap_handsfree: bool = True
 
     # Audio
@@ -46,6 +47,10 @@ class Config:
     language_detection_segments: int = 2  # more segments = steadier detection when language is "auto"
     cleanup_languages: str = DEFAULT_CLEANUP_LANGUAGES  # "all", or codes a small model handles well
     whisper_beam_size: int = 0  # 0 = automatic (5 on GPU, 2 on CPU); 1 = greedy, fastest
+    # Per-language Whisper models, used when a language is pinned (not "auto"): {"hi": "large-v3-turbo"}
+    language_models: dict[str, str] = field(default_factory=dict)
+    # Languages whose Devanagari output should be written in Roman script (Hinglish): "hi,mr"
+    romanize_languages: str = ""
 
     # LLM (Ollama)
     ollama_url: str = "http://localhost:11434"
@@ -53,6 +58,7 @@ class Config:
     # (median 2.7 s); qwen2.5:1.5b only 5/16 but at ~1.1 s. Quality wins by default.
     ollama_model: str = "llama3.2"
     cleanup_enabled: bool = True
+    spoken_punctuation: bool = True  # turn "comma" / "new paragraph" into symbols without the LLM
     llm_timeout: float = 20.0
 
     # Styles

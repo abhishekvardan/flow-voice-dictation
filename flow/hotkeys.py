@@ -84,12 +84,15 @@ class HotkeyEngine:
         on_stop: Callable[[], None],
         on_cancel: Callable[[bool], None],
         on_mode_change: Callable[[str, bool], None],
+        on_action: Callable[[str], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
     ):
         self._on_start = on_start
         self._on_stop = on_stop
         self._on_cancel = on_cancel
         self._on_mode_change = on_mode_change
+        self._on_action = on_action or (lambda _name: None)
+        self._actions: dict[str, frozenset[str]] = {}
         self._clock = clock
         self._lock = threading.RLock()
         self.enabled = True
@@ -108,8 +111,12 @@ class HotkeyEngine:
         self._touched = False
 
     # Configuration -------------------------------------------------------------------------
-    def configure(self, dictate: str, handsfree: str, command: str, double_tap: bool = True) -> None:
+    def configure(self, dictate: str, handsfree: str, command: str, double_tap: bool = True,
+                  actions: dict[str, str] | None = None) -> None:
         with self._lock:
+            self._actions = {
+                name: parse_combo(combo) for name, combo in (actions or {}).items() if parse_combo(combo)
+            }
             self._combos = {
                 name: combo
                 for name, combo in (
@@ -165,6 +172,14 @@ class HotkeyEngine:
                 return False
 
             if self._recording == "hold":
+                action = self._match_action()
+                if action is not None:
+                    # e.g. dictate is Ctrl+Win and the action is Ctrl+Win+E: the hold already
+                    # started, so drop it silently and run the action instead.
+                    self._finish(cancel=True, tap=True)
+                    self._need_release = True
+                    self._on_action(action)
+                    return self._swallow_if_trigger(key)
                 match = self._match()
                 if match == "command" and self._mode == "dictate":
                     self._mode = "command"
@@ -185,6 +200,12 @@ class HotkeyEngine:
             # Idle
             if self._need_release:
                 return False
+            action = self._match_action()
+            if action is not None:
+                self._touched = True
+                self._need_release = True
+                self._on_action(action)
+                return self._swallow_if_trigger(key)
             match = self._match()
             if match is None:
                 return False
@@ -234,6 +255,12 @@ class HotkeyEngine:
         # Most specific first.
         for name in sorted(self._combos, key=lambda n: -len(self._combos[n])):
             if combo_matches(self._pressed, self._combos[name]):
+                return name
+        return None
+
+    def _match_action(self) -> str | None:
+        for name in sorted(self._actions, key=lambda n: -len(self._actions[n])):
+            if combo_matches(self._pressed, self._actions[name]):
                 return name
         return None
 

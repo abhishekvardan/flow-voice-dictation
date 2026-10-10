@@ -5,15 +5,17 @@ class Recorder:
     def __init__(self):
         self.events = []
 
-    def engine(self, dictate="ctrl+windows", handsfree="ctrl+windows+space", command="ctrl+windows+alt"):
+    def engine(self, dictate="ctrl+windows", handsfree="ctrl+windows+space", command="ctrl+windows+alt",
+               actions=None):
         engine = HotkeyEngine(
             on_start=lambda mode, hf: self.events.append(("start", mode, hf)),
             on_stop=lambda: self.events.append(("stop",)),
             on_cancel=lambda tap: self.events.append(("cancel", tap)),
             on_mode_change=lambda mode, hf: self.events.append(("mode", mode, hf)),
+            on_action=lambda name: self.events.append(("action", name)),
             clock=lambda: 0.0,
         )
-        engine.configure(dictate, handsfree, command)
+        engine.configure(dictate, handsfree, command, actions=actions)
         return engine
 
 
@@ -187,3 +189,25 @@ def test_combo_capture():
     cap.feed("esc", True)
     cap.feed("esc", False)
     assert got == [""]
+
+
+def test_action_hotkey_fires_and_cancels_the_hold_it_started():
+    r = Recorder()
+    e = r.engine(actions={"fixup": "ctrl+windows+e"})
+    e.key_down("lctrl", 0.0)
+    e.key_down("lwin", 0.0)
+    assert r.events == [("start", "dictate", False)]
+    assert e.key_down("e", 0.05) is True  # swallowed: the app must not receive "e"
+    assert r.events[-2:] == [("cancel", True), ("action", "fixup")]
+    assert e.recording is None
+    e.key_up("e", 0.2)
+    e.key_up("lwin", 0.25)
+    e.key_up("lctrl", 0.26)
+    assert r.events[-1] == ("action", "fixup")  # releasing does not start or stop anything
+
+
+def test_action_hotkey_from_idle():
+    r = Recorder()
+    e = r.engine(dictate="f8", handsfree="", command="", actions={"fixup": "f9"})
+    assert e.key_down("f9", 0.0) is True
+    assert r.events == [("action", "fixup")]

@@ -267,7 +267,8 @@ class OllamaClient:
             timeline.info.update(server_stats(final))
         return "".join(parts)
 
-    def cleanup(self, raw: str, style: str, vocabulary: list[str], timeline=None, language: str = "") -> str:
+    def cleanup(self, raw: str, style: str, vocabulary: list[str], timeline=None, language: str = "",
+                fallback: str | None = None) -> str:
         # Cleaned text is about as long as the transcript; cap generation so a runaway model can't
         # burn seconds (num_predict can change per request without reloading the model).
         options = {**OPTIONS, "num_predict": cleanup_token_limit(raw)}
@@ -275,7 +276,7 @@ class OllamaClient:
                                     options=options))
         if not plausible_cleanup(raw, output):
             log.warning("Discarding implausible cleanup %r for %r", output[:120], raw[:120])
-            return raw
+            return fallback if fallback is not None else raw
         return output
 
     def command(self, selection: str, instruction: str, timeline=None) -> str:

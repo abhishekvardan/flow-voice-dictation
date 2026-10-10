@@ -1,4 +1,4 @@
-from flow.languages import cleanup_allowed, name, same_script, script_of
+from flow.languages import cleanup_allowed, in_list, name, same_script, script_of
 from flow.llm import build_cleanup_messages, plausible_cleanup
 
 
@@ -43,3 +43,26 @@ def test_cleanup_prompt_names_the_language():
     assert "in Hindi" in messages[0]["content"]
     assert "Hindi" in messages[-1]["content"]
     assert "Language:" not in build_cleanup_messages("hello", "Formal.", [])[-1]["content"]
+
+
+def test_in_list():
+    assert in_list("hi", "hi,mr")
+    assert in_list("MR", " hi , mr ")
+    assert not in_list("te", "hi,mr")
+    assert not in_list("", "hi")
+    assert not in_list("hi", "")
+
+
+def test_per_language_model_profiles():
+    from flow.config import Config
+    from flow.stt import model_for_language
+
+    cfg = Config()
+    cfg.whisper_model = "small"
+    cfg.language_models = {"hi": "large-v3-turbo"}
+    cfg.language = "auto"
+    assert model_for_language(cfg) == "small"      # detection happens after the model is chosen
+    cfg.language = "hi"
+    assert model_for_language(cfg) == "large-v3-turbo"
+    cfg.language = "en"
+    assert model_for_language(cfg) == "small"

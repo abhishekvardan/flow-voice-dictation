@@ -36,6 +36,12 @@ def cleanup_allowed(code: str, setting: str) -> bool:
     return code.lower() in allowed
 
 
+def in_list(code: str, setting: str) -> bool:
+    """Is this language code listed in a comma-separated setting?"""
+    codes = {part.strip().lower() for part in (setting or "").split(",") if part.strip()}
+    return bool(code) and code.lower() in codes
+
+
 def script_of(text: str) -> str:
     """Dominant writing system of a string, e.g. 'LATIN', 'DEVANAGARI', 'HAN'."""
     counts: dict[str, int] = {}

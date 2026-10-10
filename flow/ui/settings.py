@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import threading
+import time
 from datetime import datetime
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..audio import input_devices
+from ..stt import MODEL_SIZES, downloaded_models, models_dir
 from ..config import Config
 from ..llm import OllamaClient, OllamaError
 from ..styles import BUILTIN_STYLES, STYLE_LABELS, default_rules, style_prompt
@@ -36,6 +38,10 @@ QPushButton { padding: 5px 12px; }
 QPushButton:checked { background: #4f46e5; color: white; }
 QTabWidget::pane { border: none; }
 """
+
+
+def _cache_bytes() -> int:
+    return sum(f.stat().st_size for f in models_dir().rglob("*") if f.is_file())
 
 
 def _hint(text: str) -> QLabel:
@@ -63,6 +69,7 @@ def _style_combo(value: str) -> QComboBox:
 
 class SettingsWindow(QWidget):
     _models_loaded = Signal(list, str)
+    _download_done = Signal(str)
     _test_finished = Signal(str)
 
     def __init__(self, app):
@@ -76,6 +83,9 @@ class SettingsWindow(QWidget):
         self.setStyleSheet(STYLESHEET)
         self._models_loaded.connect(self._on_models_loaded)
         self._test_finished.connect(self._on_test_finished)
+        self._download_done.connect(self._on_download_done)
+        self._download_timer = QTimer(self)
+        self._download_timer.timeout.connect(self._poll_download)
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._general_tab(), "General")
@@ -166,6 +176,7 @@ class SettingsWindow(QWidget):
         self.hk_dictate = HotkeyEdit(self.app, self.cfg.hotkey_dictate)
         self.hk_handsfree = HotkeyEdit(self.app, self.cfg.hotkey_handsfree)
         self.hk_command = HotkeyEdit(self.app, self.cfg.hotkey_command)
+        self.hk_fixup = HotkeyEdit(self.app, self.cfg.hotkey_fixup)
         form.addRow("Push to talk", self.hk_dictate)
         form.addRow("", _hint("Hold to record, release to transcribe and paste."))
         form.addRow("Hands-free", self.hk_handsfree)
@@ -178,6 +189,9 @@ class SettingsWindow(QWidget):
             "Select text, hold this shortcut and say what to do (\"make this more formal\", "
             "\"translate to Hindi\"). With nothing selected, the result is inserted at the cursor."
         ))
+        form.addRow("Last dictation", self.hk_fixup)
+        form.addRow("", _hint(
+            "Opens the last result to review, edit, re-clean with another style, or insert again."))
         layout.addLayout(form)
         layout.addWidget(_hint("Press Esc while recording to cancel. Click a shortcut, then press the new key combination."))
         reset = QPushButton("Reset to defaults")
@@ -191,6 +205,7 @@ class SettingsWindow(QWidget):
 
     def _reset_shortcuts(self) -> None:
         defaults = Config()
+        self.hk_fixup.set_combo(defaults.hotkey_fixup)
         self.hk_dictate.set_combo(defaults.hotkey_dictate)
         self.hk_handsfree.set_combo(defaults.hotkey_handsfree)
         self.hk_command.set_combo(defaults.hotkey_command)
@@ -223,6 +238,45 @@ class SettingsWindow(QWidget):
         self.language.addItems(LANGUAGES)
         _select_combo(self.language, self.cfg.language)
         wform.addRow("Language", self.language)
+        download_row = QHBoxLayout()
+        self.download_button = QPushButton("Download / preload this model")
+        self.download_button.clicked.connect(self._download_model)
+        self.download_status = QLabel()
+        self.download_status.setProperty("hint", True)
+        download_row.addWidget(self.download_button)
+        download_row.addWidget(self.download_status, 1)
+        wform.addRow("", download_row)
+
+        self.language_models = QTableWidget(0, 2)
+        self.language_models.setHorizontalHeaderLabels(["Language code", "Whisper model"])
+        self.language_models.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.language_models.setColumnWidth(0, 120)
+        self.language_models.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.language_models.verticalHeader().setVisible(False)
+        self.language_models.setMaximumHeight(120)
+        for code, model in (self.cfg.language_models or {}).items():
+            self._add_language_model_row(code, model)
+        wform.addRow("Model per language", self.language_models)
+        profile_row = QHBoxLayout()
+        for text, slot in (("Add", lambda: self._add_language_model_row("", "large-v3-turbo")),
+                           ("Remove selected", self._remove_language_model_rows)):
+            button = QPushButton(text)
+            button.clicked.connect(slot)
+            profile_row.addWidget(button)
+        profile_row.addStretch()
+        wform.addRow("", profile_row)
+        wform.addRow("", _hint(
+            "Used when you pin a language (tray menu or the Language box above), since automatic detection "
+            "only knows the language after transcribing. large-v3-turbo is much better for Hindi, Telugu "
+            "and Tamil than small."))
+
+        self.romanize_languages = QLineEdit(self.cfg.romanize_languages)
+        self.romanize_languages.setPlaceholderText("hi,mr   (leave empty to keep Devanagari)")
+        wform.addRow("Write in Roman script", self.romanize_languages)
+        wform.addRow("", _hint(
+            "Converts Hindi/Marathi output to Hinglish spelling (मैं सोचता हूँ -> main sochta hoon) "
+            "by rules, with no model involved."))
+
         self.whisper_status = QLabel()
         wform.addRow("Status", self.whisper_status)
         layout.addWidget(whisper)
@@ -249,6 +303,12 @@ class SettingsWindow(QWidget):
         self.llm_timeout.setSuffix(" s")
         self.llm_timeout.setValue(int(self.cfg.llm_timeout))
         oform.addRow("Timeout", self.llm_timeout)
+        self.spoken_punctuation = QCheckBox('Turn spoken "comma", "period" and "new paragraph" into symbols')
+        self.spoken_punctuation.setChecked(self.cfg.spoken_punctuation)
+        oform.addRow("", self.spoken_punctuation)
+        oform.addRow("", _hint(
+            "Applied by rules, with no model involved. These rules also fix capitalization, spacing and "
+            "stutters on every dictation, so you still get tidy text when AI cleanup is off or rejected."))
         self.cleanup_languages = QLineEdit(self.cfg.cleanup_languages)
         self.cleanup_languages.setPlaceholderText("en,es,fr  (or: all)")
         oform.addRow("Clean up only", self.cleanup_languages)
@@ -273,6 +333,70 @@ class SettingsWindow(QWidget):
         layout.addStretch()
         self._refresh_models()
         return page
+
+    def _add_language_model_row(self, code: str, model: str) -> None:
+        row = self.language_models.rowCount()
+        self.language_models.insertRow(row)
+        self.language_models.setItem(row, 0, QTableWidgetItem(code))
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.addItems(WHISPER_MODELS)
+        _select_combo(combo, model)
+        self.language_models.setCellWidget(row, 1, combo)
+
+    def _remove_language_model_rows(self) -> None:
+        for row in sorted({i.row() for i in self.language_models.selectedIndexes()}, reverse=True):
+            self.language_models.removeRow(row)
+
+    def _collect_language_models(self) -> dict:
+        profiles = {}
+        for row in range(self.language_models.rowCount()):
+            item = self.language_models.item(row, 0)
+            code = (item.text().strip().lower() if item else "")
+            model = self.language_models.cellWidget(row, 1).currentText().strip()
+            if code and model:
+                profiles[code] = model
+        return profiles
+
+    def _download_model(self) -> None:
+        name = self.whisper_model.currentText().strip()
+        if not name or name == "auto":
+            self.download_status.setText("Pick a specific model first (auto resolves at load time).")
+            return
+        if name in downloaded_models():
+            self.download_status.setText(f"{name} is already downloaded.")
+            return
+        size = MODEL_SIZES.get(name, "unknown size")
+        self.download_status.setText(f"Downloading {name} ({size})… you can keep using Flow.")
+        self.download_button.setEnabled(False)
+        cfg = self.app.cfg.copy()
+        cfg.whisper_model = name
+        self._download_started = time.monotonic()
+        self._download_start_bytes = _cache_bytes()
+        self._downloading = name
+
+        def work() -> None:
+            try:
+                self.app.transcriber.load(cfg, name)
+                self._download_done.emit(f"{name} is ready.")
+            except Exception as exc:
+                self._download_done.emit(f"Download failed: {exc}")
+
+        threading.Thread(target=work, daemon=True, name="flow-model-download").start()
+        self._download_timer.start(2000)
+
+    def _poll_download(self) -> None:
+        """Shows real progress by watching the model cache grow (no download hooks needed)."""
+        grown = (_cache_bytes() - self._download_start_bytes) / 1e6
+        elapsed = time.monotonic() - self._download_started
+        self.download_status.setText(
+            f"Downloading {self._downloading} ({MODEL_SIZES.get(self._downloading, '?')})… "
+            f"{grown:,.0f} MB in {elapsed:.0f}s")
+
+    def _on_download_done(self, message: str) -> None:
+        self._download_timer.stop()
+        self.download_button.setEnabled(True)
+        self.download_status.setText(message)
 
     def _client(self) -> OllamaClient:
         return OllamaClient(self.ollama_url.text().strip(), self.ollama_model.currentText().strip(),
@@ -697,14 +821,18 @@ class SettingsWindow(QWidget):
         cfg.hotkey_dictate = self.hk_dictate.combo
         cfg.hotkey_handsfree = self.hk_handsfree.combo
         cfg.hotkey_command = self.hk_command.combo
+        cfg.hotkey_fixup = self.hk_fixup.combo
         cfg.double_tap_handsfree = self.double_tap.isChecked()
 
         cfg.whisper_model = self.whisper_model.currentText().strip() or "auto"
         cfg.whisper_device = self.whisper_device.currentText()
         cfg.whisper_compute_type = self.compute_type.currentText()
         cfg.language = self.language.currentText().strip() or "auto"
+        cfg.language_models = self._collect_language_models()
+        cfg.romanize_languages = self.romanize_languages.text().strip()
         cfg.cleanup_enabled = self.cleanup_enabled.isChecked()
         cfg.cleanup_languages = self.cleanup_languages.text().strip() or "all"
+        cfg.spoken_punctuation = self.spoken_punctuation.isChecked()
         cfg.ollama_url = self.ollama_url.text().strip() or "http://localhost:11434"
         cfg.ollama_model = self.ollama_model.currentText().strip() or "qwen2.5:1.5b"
         cfg.llm_timeout = float(self.llm_timeout.value())

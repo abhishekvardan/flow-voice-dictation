@@ -85,6 +85,8 @@ user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wint
 user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
 user32.SendInput.restype = wintypes.UINT
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 user32.GetAsyncKeyState.restype = ctypes.c_short
 kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
@@ -182,6 +184,14 @@ def wait_modifiers_released(timeout: float = 3.0) -> bool:
             return True
         time.sleep(0.01)
     return False
+
+
+def focus_window(hwnd: int) -> bool:
+    """Brings a window to the foreground. Windows only allows this for the process that produced
+    the most recent input, so a no-op key is injected first."""
+    send_inputs([_key(VK_MASK), _key(VK_MASK, flags=KEYEVENTF_KEYUP)])
+    user32.SetForegroundWindow(wintypes.HWND(hwnd))
+    return user32.GetForegroundWindow() == hwnd
 
 
 class KeyboardHook:
