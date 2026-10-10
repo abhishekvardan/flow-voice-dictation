@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 POLL_SECONDS = 0.15
 CUT_SILENCE = 0.45     # a pause this long is a safe place to cut
 MIN_CHUNK_SECONDS = 2.0   # below this, a chunk costs more than it saves
-MAX_CHUNK_SECONDS = 10.0  # cut anyway, so the tail at release stays short
+MAX_CHUNK_SECONDS = 6.0   # cut anyway, so the tail at release stays short
 QUIET_SEARCH_SECONDS = 1.5  # when forced to cut, look here for the quietest moment
 QUIET_WINDOW = 1600  # 100 ms at 16 kHz
 
@@ -73,6 +73,11 @@ class StreamingTranscriber:
 
     def cancel(self) -> None:
         self._stop.set()
+
+    def text_so_far(self) -> str:
+        """What has been transcribed while the user keeps speaking (for the live panel)."""
+        with self._lock:
+            return " ".join(piece for piece in self._pieces if piece).strip()
 
     def finish(self, audio: np.ndarray | None = None, timeout: float = 30.0) -> tuple[str, str]:
         """Transcribes whatever is left and returns (text, language).

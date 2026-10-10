@@ -28,6 +28,8 @@ VK_MASK = 0xE8  # unassigned; used to stop Win/Alt releases from opening Start /
 VK_PROBE = 0xE9  # unassigned; the watchdog's "is the hook alive?" keystroke
 WM_REINSTALL = 0x0400 + 77  # WM_APP + n, posted to the hook thread
 WATCHDOG_SECONDS = 30
+WATCHDOG_WAIT = 2.5        # the callback runs in Python: a busy GPU or model load can delay it
+WATCHDOG_STRIKES = 3       # reinstall only after this many consecutive missed probes
 FLOW_MAGIC = 0x464C4F57  # dwExtraInfo tag on our own injected input
 
 LRESULT = ctypes.c_ssize_t
@@ -212,6 +214,7 @@ class KeyboardHook:
         self._injector = threading.Thread(target=self._inject_loop, daemon=True, name="flow-inject")
         self._hook = None
         self._seen = threading.Event()
+        self._last_event = 0.0
         self._stopping = False
         self._reinstalls = 0
 
@@ -256,17 +259,28 @@ class KeyboardHook:
     def _watchdog(self) -> None:
         """Windows silently removes a low-level hook whose callback times out. Probe for that.
 
-        A synthetic key is injected every WATCHDOG_SECONDS; if the callback does not see it, the
-        hook is gone and gets reinstalled on the hook thread.
+        Real keystrokes already prove the hook is alive, so a probe is only injected after a quiet
+        stretch, and a reinstall needs several misses in a row: the callback is Python code, and
+        while a model is loading it can be delayed past any single deadline.
         """
+        misses = 0
         while not self._stopping:
             time.sleep(WATCHDOG_SECONDS)
             if self._stopping or not self._thread_id:
                 continue
+            if time.monotonic() - self._last_event < WATCHDOG_SECONDS:
+                misses = 0  # the user has been typing: nothing to check
+                continue
             self._seen.clear()
             send_inputs([_key(VK_PROBE), _key(VK_PROBE, flags=KEYEVENTF_KEYUP)])
-            if self._seen.wait(1.0):
+            if self._seen.wait(WATCHDOG_WAIT):
+                misses = 0
                 continue
+            misses += 1
+            log.info("Keyboard hook probe missed (%d/%d)", misses, WATCHDOG_STRIKES)
+            if misses < WATCHDOG_STRIKES:
+                continue
+            misses = 0
             log.warning("Keyboard hook stopped receiving events; reinstalling")
             if self._hook:
                 user32.UnhookWindowsHookEx(self._hook)
@@ -280,6 +294,7 @@ class KeyboardHook:
         if n_code == 0:
             kb = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
             self._seen.set()  # proof for the watchdog that the hook is still alive
+            self._last_event = time.monotonic()
             if kb.vkCode == VK_PROBE:
                 return 1
             if kb.dwExtraInfo != FLOW_MAGIC:

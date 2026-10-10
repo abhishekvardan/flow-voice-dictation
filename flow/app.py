@@ -31,6 +31,7 @@ from .inserter import Inserter
 from .llm import OllamaClient, OllamaError, is_local_url
 from .pipeline import process
 from .stream import StreamingTranscriber
+from .styles import resolve_style
 from .stt import Transcriber, model_for_language
 from .timing import Timeline
 from .ui.icons import mic_icon
@@ -136,6 +137,9 @@ class FlowApp(QObject):
         self._limit_timer = QTimer(self)
         self._limit_timer.setInterval(250)
         self._limit_timer.timeout.connect(self._check_limit)
+        self._live_timer = QTimer(self)
+        self._live_timer.setInterval(250)
+        self._live_timer.timeout.connect(self._update_live_text)
 
         self._build_tray()
 
@@ -312,8 +316,34 @@ class FlowApp(QObject):
             return
         session.revealed = True
         self.sounds.play("start")
-        self.overlay.show_recording(session.mode, session.handsfree)
+        self.overlay.show_recording(session.mode, session.handsfree, self._status_for(session))
         self._set_icon("command" if session.mode == "command" else "recording")
+        if session.streamer is not None:
+            self._live_timer.start()
+
+    def _status_for(self, session: Session) -> str:
+        """"notepad.exe · formal" - where the text is going and how it will be written."""
+        ctx = session.ctx
+        if session.mode == "command":
+            return f"{ctx.process or 'selection'} · rewrite"
+        style = resolve_style(ctx.process, ctx.title, self.cfg.style_rules, self.cfg.default_style)
+        bits = [ctx.process or "unknown app", style]
+        if self.cfg.language not in ("", "auto"):
+            bits.append(self.cfg.language)
+        if not self.cfg.cleanup_enabled or self.llm_blocked:
+            bits.append("rules only")
+        return " · ".join(bits)
+
+    def _update_live_text(self) -> None:
+        session = self._session
+        if session is None or session.streamer is None:
+            self._live_timer.stop()
+            return
+        self.overlay.set_partial(session.streamer.text_so_far())
+        language = getattr(session.streamer, "language", "")
+        if language and self.cfg.language in ("", "auto"):
+            status = self._status_for(session)
+            self.overlay.set_status(f"{status} · {language}")
 
     def _on_mode(self, mode: str, handsfree: bool) -> None:
         session = self._session
@@ -343,14 +373,16 @@ class FlowApp(QObject):
                 self._settle_ui()
             return
         self.sounds.play("stop")
+        self._live_timer.stop()
         self._pending_jobs += 1
-        self.overlay.show_processing()
+        self.overlay.show_processing(self._status_for(session))
         self._set_icon("processing")
         self.executor.submit(self._run_job, session, audio, duration, self._effective_config())
 
     def _on_cancel(self, was_tap: bool) -> None:
         session, self._session = self._session, None
         self._limit_timer.stop()
+        self._live_timer.stop()
         if session is not None and session.streamer is not None:
             session.streamer.cancel()
         self.recorder.cancel()
@@ -499,9 +531,10 @@ class FlowApp(QObject):
         menu.addAction(self._pause_action)
         self._recent_menu = menu.addMenu("Recent dictations")
         self._recent_menu.aboutToShow.connect(self._fill_recent)
+        menu.addAction("Open Flow…", self.open_settings)
         menu.addAction("Last dictation…", self.open_fixup)
         menu.addAction("Getting started…", self.open_welcome)
-        menu.addAction("Settings…", self.open_settings)
+        menu.addAction("Settings…", lambda: self.open_settings("General"))
         menu.addSeparator()
         menu.addAction("Quit Flow", self.quit)
         self.tray.setContextMenu(menu)
@@ -553,7 +586,7 @@ class FlowApp(QObject):
         cfg.cleanup_enabled = enabled
         self.apply_config(cfg)
         if self.settings_window is not None:
-            self.settings_window.cleanup_enabled.setChecked(enabled)
+            self.settings_window.settings.cleanup_enabled.setChecked(enabled)
 
     def set_paused(self, paused: bool) -> None:
         self.paused = paused
@@ -566,8 +599,10 @@ class FlowApp(QObject):
         self._refresh_tray()
 
     def _on_hook_reinstalled(self, count: int) -> None:
-        self._warn(f"Windows dropped Flow's keyboard hook; it has been reinstalled "
-                   f"({count} time{'s' if count != 1 else ''} this session).")
+        log.warning("Keyboard hook reinstalled (%d this session)", count)
+        if count in (3, 10):  # only speak up if it keeps happening
+            self._warn(f"Windows keeps dropping Flow's keyboard hook (reinstalled {count} times). "
+                       f"Shortcuts still work, but tell me if they stop responding.")
 
     def _effective_config(self) -> Config:
         """The config a job should run with: AI cleanup off when the model is not trusted."""
@@ -625,11 +660,14 @@ class FlowApp(QObject):
         dialog = WelcomeDialog(self)
         dialog.exec()
 
-    def open_settings(self) -> None:
-        from .ui.settings import SettingsWindow
+    def open_settings(self, page: str = "") -> None:
+        from .ui.main_window import MainWindow
 
         if self.settings_window is None:
-            self.settings_window = SettingsWindow(self)
+            self.settings_window = MainWindow(self)
+        if page:
+            self.settings_window.show_page(page)
+        self.settings_window.refresh()
         self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()

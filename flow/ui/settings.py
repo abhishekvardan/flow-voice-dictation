@@ -23,6 +23,7 @@ from ..llm import OllamaClient, OllamaError
 from ..styles import BUILTIN_STYLES, STYLE_LABELS, default_rules, style_prompt
 from .hotkey_edit import HotkeyEdit
 from .icons import mic_icon
+from .theme import STYLESHEET as DARK_THEME
 
 WHISPER_MODELS = [
     "auto", "tiny", "base", "small", "medium", "large-v3-turbo", "distil-large-v3",
@@ -75,15 +76,16 @@ class SettingsWindow(QWidget):
     _vocab_imported = Signal(str)
     _test_finished = Signal(str)
 
-    def __init__(self, app):
+    def __init__(self, app, embedded: bool = False):
         super().__init__()
         self.app = app
+        self.embedded = embedded
         self.cfg: Config = app.cfg.copy()
         self._prompts: dict[str, str] = dict(self.cfg.style_prompts)
         self.setWindowTitle("Flow Settings")
         self.setWindowIcon(mic_icon())
         self.resize(820, 620)
-        self.setStyleSheet(STYLESHEET)
+        self.setStyleSheet(DARK_THEME + STYLESHEET)
         self._models_loaded.connect(self._on_models_loaded)
         self._test_finished.connect(self._on_test_finished)
         self._download_done.connect(self._on_download_done)
@@ -105,20 +107,20 @@ class SettingsWindow(QWidget):
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
         self._saved_label = QLabel("")
-        save = QPushButton("Save")
-        save.setDefault(True)
-        save.clicked.connect(self._save)
-        close = QPushButton("Close")
-        close.clicked.connect(self.close)
-        buttons = QHBoxLayout()
-        buttons.addWidget(self._saved_label)
-        buttons.addStretch()
-        buttons.addWidget(save)
-        buttons.addWidget(close)
-
         root = QVBoxLayout(self)
         root.addWidget(self.tabs)
-        root.addLayout(buttons)
+        if not embedded:  # standalone window keeps its own buttons
+            save = QPushButton("Save")
+            save.setDefault(True)
+            save.clicked.connect(self._save)
+            close = QPushButton("Close")
+            close.clicked.connect(self.close)
+            buttons = QHBoxLayout()
+            buttons.addWidget(self._saved_label)
+            buttons.addStretch()
+            buttons.addWidget(save)
+            buttons.addWidget(close)
+            root.addLayout(buttons)
 
         self.refresh_status()
 
