@@ -12,3 +12,8 @@ bench/samples/
 
 # Logs
 *.log
+
+# PyInstaller
+build/
+dist/
+*.spec.bak

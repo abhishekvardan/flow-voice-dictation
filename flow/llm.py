@@ -184,6 +184,13 @@ def build_command_messages(selection: str, instruction: str) -> list[dict]:
     ]
 
 
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+
+
+def is_local_url(url: str) -> bool:
+    return (urlsplit(normalize_url(url)).hostname or "") in LOOPBACK_HOSTS
+
+
 def normalize_url(url: str) -> str:
     """Use 127.0.0.1 instead of localhost.
 
@@ -297,12 +304,27 @@ class OllamaClient:
                                   timeout=max(self.timeout, 60), timeline=timeline))
 
     def list_models(self) -> list[str]:
+        return sorted(model["name"] for model in self.model_details())
+
+    def model_details(self) -> list[dict]:
         try:
             response = httpx.get(f"{self.url}/api/tags", timeout=5)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise OllamaError(f"Ollama is not reachable at {self.url}") from exc
-        return sorted(model["name"] for model in response.json().get("models", []))
+        return response.json().get("models", [])
+
+    def is_cloud_pointer(self, name: str | None = None) -> bool:
+        """True for an Ollama entry that only points at a remote model.
+
+        Those manifests hold no weights - a few hundred bytes instead of hundreds of megabytes -
+        so selecting one would send dictation off the machine.
+        """
+        wanted = name or self.model
+        for model in self.model_details():
+            if model.get("name") in (wanted, f"{wanted}:latest"):
+                return int(model.get("size") or 0) < 50_000_000
+        return False
 
     def warmup(self, timeout: float = 120) -> None:
         """Loads the model into Ollama without generating anything."""

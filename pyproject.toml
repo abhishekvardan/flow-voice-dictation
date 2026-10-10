@@ -21,6 +21,9 @@ gpu = [
     "nvidia-cudnn-cu12>=9.1,<10",
 ]
 
+
+build = ["pyinstaller>=6.6"]
+
 [dependency-groups]
 dev = ["pytest>=8"]
 

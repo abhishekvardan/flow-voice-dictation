@@ -45,3 +45,27 @@ def test_dictionary_and_history_storage(tmp_path):
     assert words == 2 and round(wpm) == 4
     h.clear()
     assert h.recent() == []
+
+
+def test_history_stats_and_breakdowns(tmp_path):
+    db = Database(tmp_path / "flow.db")
+    h = History(db)
+    for i, (app, style, mode, final) in enumerate([
+        ("code.exe", "code", "dictate", "fix the login bug"),
+        ("code.exe", "code", "dictate", "add a test"),
+        ("slack.exe", "casual", "dictate", "sounds good to me"),
+        ("code.exe", "command", "command", "shorter text"),
+    ]):
+        h.add(mode=mode, app=app, style=style, raw=final, final=final,
+              duration=10.0, stt_ms=500 + i, llm_ms=1000 + i)
+
+    s = h.summary()
+    assert s["dictations"] == 4
+    assert s["seconds"] == 40.0
+    assert round(s["avg_stt_ms"]) == 502
+    assert s["words"] == 11  # dictate rows only: 4 + 3 + 4 words
+
+    by_app = dict((row[0], row[1]) for row in h.by_column("app"))
+    assert by_app == {"code.exe": 3, "slack.exe": 1}
+    assert h.by_column("mode")[0][0] == "dictate"
+    assert len(h.per_day()) == 1

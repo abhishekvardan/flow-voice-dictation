@@ -70,3 +70,12 @@ def test_guard_rejects_assistant_answers_and_lost_content():
                              "because the the new build is not ready yet",
                              "So I think we should probably move the design review to Thursday, "
                              "because the new build is not ready yet.")
+
+
+def test_is_local_url():
+    from flow.llm import is_local_url
+
+    assert is_local_url("http://localhost:11434")
+    assert is_local_url("http://127.0.0.1:11434/")
+    assert not is_local_url("http://192.168.1.50:11434")
+    assert not is_local_url("https://ollama.example.com")

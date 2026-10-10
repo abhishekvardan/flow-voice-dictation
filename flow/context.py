@@ -14,6 +14,7 @@ class WindowContext:
     hwnd: int = 0
     process: str = ""
     title: str = ""
+    elevated: bool = False  # an admin window: Windows blocks synthetic input from normal apps
 
 
 TERMINALS = {
@@ -27,7 +28,26 @@ def active_window() -> WindowContext:
         hwnd = win32gui.GetForegroundWindow()
         title = win32gui.GetWindowText(hwnd)
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        process = psutil.Process(pid).name().lower() if pid else ""
-        return WindowContext(hwnd, process, title)
+        process = ""
+        elevated = False
+        if pid:
+            try:
+                process = psutil.Process(pid).name().lower()
+            except psutil.AccessDenied:
+                # Only an elevated (or protected) process refuses this to a normal app.
+                elevated = True
+            except psutil.Error:
+                pass
+        return WindowContext(hwnd, process, title, elevated)
     except Exception:
         return WindowContext()
+
+
+def is_elevated() -> bool:
+    """Is Flow itself running as administrator?"""
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False

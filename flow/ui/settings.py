@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QGuiApplication
@@ -99,6 +100,7 @@ class SettingsWindow(QWidget):
         self.tabs.addTab(self._dictionary_tab(), "Dictionary")
         self.tabs.addTab(self._snippets_tab(), "Snippets")
         self.tabs.addTab(self._skills_tab(), "Skills")
+        self.tabs.addTab(self._stats_tab(), "Stats")
         self.tabs.addTab(self._history_tab(), "History")
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
@@ -192,6 +194,16 @@ class SettingsWindow(QWidget):
         self.launch_at_login.setChecked(self.cfg.launch_at_login)
         form.addRow("", self.launch_at_login)
 
+        backup_row = QHBoxLayout()
+        export_button = QPushButton("Export settings…")
+        import_button = QPushButton("Import settings…")
+        export_button.clicked.connect(self._export_settings)
+        import_button.clicked.connect(self._import_settings)
+        backup_row.addWidget(export_button)
+        backup_row.addWidget(import_button)
+        backup_row.addStretch()
+        form.addRow("Backup", backup_row)
+
         self.debug_latency = QCheckBox("Show latency breakdown after each dictation (debug)")
         self.debug_latency.setChecked(self.cfg.debug_latency)
         form.addRow("", self.debug_latency)
@@ -232,6 +244,39 @@ class SettingsWindow(QWidget):
         layout.addLayout(row)
         layout.addStretch()
         return page
+
+    def _export_settings(self) -> None:
+        import json
+        from dataclasses import asdict
+
+        path, _ = QFileDialog.getSaveFileName(self, "Export settings", "flow-settings.json",
+                                              "JSON (*.json)")
+        if path:
+            self._save()  # export what is on screen, not a stale copy
+            Path(path).write_text(json.dumps(asdict(self.app.cfg), indent=2), encoding="utf-8")
+            self._saved_label.setText(f"Exported to {path}")
+
+    def _import_settings(self) -> None:
+        import json
+        from dataclasses import fields
+
+        path, _ = QFileDialog.getOpenFileName(self, "Import settings", "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Import failed", str(exc))
+            return
+        cfg = self.app.cfg.copy()
+        known = {f.name for f in fields(cfg)}
+        for key, value in data.items():
+            if key in known:
+                setattr(cfg, key, value)
+        self.app.apply_config(cfg)
+        QMessageBox.information(self, "Settings imported",
+                                "Imported. Reopen this window to see every value.")
+        self.close()
 
     def _toggle_mic_test(self, on: bool) -> None:
         """Live input level, so a dead or muted microphone is obvious before dictating."""
@@ -342,6 +387,12 @@ class SettingsWindow(QWidget):
         self.cleanup_enabled = QCheckBox("Clean up dictation with AI (remove filler words, fix punctuation, apply style)")
         self.cleanup_enabled.setChecked(self.cfg.cleanup_enabled)
         oform.addRow("", self.cleanup_enabled)
+        self.local_only = QCheckBox("Local only: refuse cloud models and remote Ollama servers")
+        self.local_only.setChecked(self.cfg.local_only)
+        oform.addRow("", self.local_only)
+        oform.addRow("", _hint(
+            "Some Ollama entries are a few hundred bytes: a pointer to a model that runs in the cloud. "
+            "With this on, Flow refuses them and keeps using rules-only cleanup instead."))
         self.ollama_url = QLineEdit(self.cfg.ollama_url)
         oform.addRow("Server URL", self.ollama_url)
         model_row = QHBoxLayout()
@@ -897,6 +948,61 @@ class SettingsWindow(QWidget):
         refresh()
         return page
 
+    # Stats --------------------------------------------------------------------------------------
+    def _stats_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        self.stats_totals = QLabel()
+        self.stats_totals.setTextFormat(Qt.RichText)
+        layout.addWidget(self.stats_totals)
+        self.stats_tables = QHBoxLayout()
+        layout.addLayout(self.stats_tables, 1)
+        self.stats_breakdowns: dict[str, QTableWidget] = {}
+        for column, heading in (("app", "App"), ("style", "Style"), ("mode", "Mode")):
+            table = QTableWidget(0, 3)
+            table.setHorizontalHeaderLabels([heading, "Dictations", "Words"])
+            table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            table.verticalHeader().setVisible(False)
+            self.stats_breakdowns[column] = table
+            self.stats_tables.addWidget(table)
+        self.stats_days = QTableWidget(0, 2)
+        self.stats_days.setHorizontalHeaderLabels(["Day", "Dictations"])
+        self.stats_days.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.stats_days.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.stats_days.verticalHeader().setVisible(False)
+        self.stats_days.setMaximumHeight(170)
+        layout.addWidget(self.stats_days)
+        refresh = QPushButton("Refresh")
+        refresh.clicked.connect(self._refresh_stats)
+        row = QHBoxLayout()
+        row.addWidget(refresh)
+        row.addStretch()
+        layout.addLayout(row)
+        return page
+
+    def _refresh_stats(self) -> None:
+        history = self.app.history
+        s = history.summary()
+        minutes = s["seconds"] / 60
+        self.stats_totals.setText(
+            f"<b>{s['dictations']:,}</b> dictations · <b>{s['words']:,}</b> words · "
+            f"<b>{minutes:,.0f}</b> minutes spoken · <b>{s['wpm']:.0f}</b> words per minute<br>"
+            f"average speech recognition <b>{s['avg_stt_ms']:,.0f} ms</b> · "
+            f"average AI cleanup <b>{s['avg_llm_ms']:,.0f} ms</b>")
+        for column, table in self.stats_breakdowns.items():
+            rows = history.by_column(column)
+            table.setRowCount(len(rows))
+            for i, (key, count, words) in enumerate(rows):
+                table.setItem(i, 0, QTableWidgetItem(str(key)))
+                table.setItem(i, 1, QTableWidgetItem(f"{count:,}"))
+                table.setItem(i, 2, QTableWidgetItem(f"{words:,}"))
+        days = history.per_day()
+        self.stats_days.setRowCount(len(days))
+        for i, (day, count) in enumerate(days):
+            self.stats_days.setItem(i, 0, QTableWidgetItem(day))
+            self.stats_days.setItem(i, 1, QTableWidgetItem("█" * min(40, count) + f" {count}"))
+
     # History ------------------------------------------------------------------------------------
     def _history_tab(self) -> QWidget:
         page = QWidget()
@@ -973,6 +1079,8 @@ class SettingsWindow(QWidget):
     def _on_tab_changed(self, index: int) -> None:
         if self.tabs.tabText(index) == "History":
             self._refresh_history()
+        elif self.tabs.tabText(index) == "Stats":
+            self._refresh_stats()
 
     def _save(self) -> None:
         cfg = self.app.cfg.copy()
@@ -1002,6 +1110,7 @@ class SettingsWindow(QWidget):
         cfg.romanize_languages = self.romanize_languages.text().strip()
         cfg.cleanup_enabled = self.cleanup_enabled.isChecked()
         cfg.cleanup_languages = self.cleanup_languages.text().strip() or "all"
+        cfg.local_only = self.local_only.isChecked()
         cfg.spoken_punctuation = self.spoken_punctuation.isChecked()
         cfg.ollama_url = self.ollama_url.text().strip() or "http://localhost:11434"
         cfg.ollama_model = self.ollama_model.currentText().strip() or "qwen2.5:1.5b"

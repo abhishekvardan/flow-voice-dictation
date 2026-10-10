@@ -16,6 +16,13 @@ Everything runs on your machine: **faster-whisper** turns speech into text and *
 - **History**: searchable, with words dictated and words per minute. Recent dictations are also in the tray menu.
 - **Floating bubble**: shows a live waveform, processing dots, and errors. It never takes focus away from your app.
 - All shortcuts are configurable, including single keys like `F8` or side-specific keys like `Right Alt`.
+- **Rules-based cleanup** (no model): fillers, stutters, spacing, capitalization and spoken punctuation are fixed by rules on every dictation. This is also what gets inserted whenever AI cleanup is unavailable, skipped or rejected, so you never get a raw, unpunctuated dump.
+- **Last dictation panel** (`Ctrl + Win + E`): review and edit the result, switch between the exact transcript / rules version / AI version, clean it again with a different style, or insert it again.
+- **Voice skills**: say a saved name and then speak - "commit message: fixed the login redirect bug" or "bug report: ...". Ships with commit message, bug report, prompt and email reply; add your own.
+- **Prompt mode for coding tools** plus spoken code symbols ("flow slash app dot py" -> `flow/app.py`), and a one-click import of identifiers from a project folder into your dictionary.
+- **Stats**: dictations, words, minutes spoken, words per minute, average speech and AI timings, and breakdowns by app, style and day.
+- **Local only by default**: Flow refuses Ollama entries that are just pointers to cloud models, and non-loopback servers, so dictation cannot leave the machine by accident.
+- **Keeps working**: a watchdog reinstalls the keyboard hook if Windows drops it, hands-free can stop itself after silence, and admin windows are detected and explained rather than silently failing.
 - **Multi-language**: Whisper transcribes ~99 languages. Pick one from the tray menu (**Language**) or let it detect automatically. Fixing the language is faster (measured: 298 ms vs 822 ms on a short clip) and avoids misdetection.
 
 ## Languages and AI cleanup
@@ -73,8 +80,22 @@ it falls back to the CPU automatically; the tray menu shows which device is in u
 ## Development
 
 ```powershell
-uv run pytest
+uv run pytest                                        # 58 tests
+uv run python bench/benchmark.py --label mine        # latency benchmark
+uv run python bench/benchmark.py --compare before mine
 ```
+
+GitHub Actions runs the tests on every push (`.github/workflows/tests.yml`).
+
+### Building a standalone Flow.exe
+
+```powershell
+uv sync --extra build
+uv run pyinstaller packaging/flow.spec --noconfirm
+```
+
+The result is `dist/Flow/Flow.exe`, which runs without uv or Python. Whisper models are not
+bundled; they download to `%APPDATA%\Flow\models` on first use.
 
 Code map: `flow/hotkeys.py` (shortcut state machine), `flow/winkeys.py` (low-level keyboard hook and SendInput),
 `flow/audio.py`, `flow/stt.py`, `flow/llm.py`, `flow/inserter.py`, `flow/app.py` (wiring), `flow/ui/` (bubble, settings).

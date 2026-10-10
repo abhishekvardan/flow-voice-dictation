@@ -58,6 +58,7 @@ class Config:
     # (median 2.7 s); qwen2.5:1.5b only 5/16 but at ~1.1 s. Quality wins by default.
     ollama_model: str = "llama3.2"
     cleanup_enabled: bool = True
+    local_only: bool = True  # refuse cloud-backed Ollama entries and non-loopback servers
     spoken_punctuation: bool = True  # turn "comma" / "new paragraph" into symbols without the LLM
     command_mode_output: str = "replace"  # replace | panel (show the result instead of pasting)
     auto_stop_silence: float = 0.0  # hands-free: stop after this many seconds of silence (0 = off)
@@ -76,6 +77,7 @@ class Config:
     history_enabled: bool = True
     history_retention_days: int = 30
     launch_at_login: bool = False
+    welcome_shown: bool = False
     debug_latency: bool = False  # show a per-dictation latency breakdown on the overlay
 
     def copy(self) -> "Config":

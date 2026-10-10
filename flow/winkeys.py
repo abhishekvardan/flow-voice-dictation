@@ -25,6 +25,9 @@ INPUT_KEYBOARD = 1
 KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE = 0x1, 0x2, 0x4
 VK_CONTROL, VK_RETURN = 0x11, 0x0D
 VK_MASK = 0xE8  # unassigned; used to stop Win/Alt releases from opening Start / menus
+VK_PROBE = 0xE9  # unassigned; the watchdog's "is the hook alive?" keystroke
+WM_REINSTALL = 0x0400 + 77  # WM_APP + n, posted to the hook thread
+WATCHDOG_SECONDS = 30
 FLOW_MAGIC = 0x464C4F57  # dwExtraInfo tag on our own injected input
 
 LRESULT = ctypes.c_ssize_t
@@ -197,8 +200,9 @@ def focus_window(hwnd: int) -> bool:
 class KeyboardHook:
     """Runs a low-level keyboard hook on its own thread and feeds the HotkeyEngine."""
 
-    def __init__(self, engine: HotkeyEngine):
+    def __init__(self, engine: HotkeyEngine, on_reinstall=None):
         self.engine = engine
+        self.on_reinstall = on_reinstall
         self.capture: ComboCapture | None = None
         self._thread: threading.Thread | None = None
         self._thread_id = 0
@@ -206,36 +210,78 @@ class KeyboardHook:
         self._proc = HOOKPROC(self._callback)
         self._reinject: queue.Queue[tuple[int, int, int] | None] = queue.Queue()
         self._injector = threading.Thread(target=self._inject_loop, daemon=True, name="flow-inject")
+        self._hook = None
+        self._seen = threading.Event()
+        self._stopping = False
+        self._reinstalls = 0
 
     def start(self) -> None:
         self._injector.start()
         self._thread = threading.Thread(target=self._run, daemon=True, name="flow-keyboard-hook")
         self._thread.start()
         self._ready.wait(5)
+        threading.Thread(target=self._watchdog, daemon=True, name="flow-hook-watchdog").start()
 
     def stop(self) -> None:
+        self._stopping = True
         if self._thread_id:
             user32.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)
         self._reinject.put(None)
 
     def _run(self) -> None:
         self._thread_id = kernel32.GetCurrentThreadId()
-        hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._proc, kernel32.GetModuleHandleW(None), 0)
-        if not hook:
-            log.error("SetWindowsHookExW failed (error %d)", ctypes.get_last_error())
+        if not self._install():
             self._ready.set()
             return
-        log.info("Keyboard hook installed")
         self._ready.set()
         msg = wintypes.MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            if msg.message == WM_REINSTALL:
+                self._install()
+                continue
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
-        user32.UnhookWindowsHookEx(hook)
+        if self._hook:
+            user32.UnhookWindowsHookEx(self._hook)
+
+    def _install(self) -> bool:
+        self._hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._proc,
+                                              kernel32.GetModuleHandleW(None), 0)
+        if not self._hook:
+            log.error("SetWindowsHookExW failed (error %d)", ctypes.get_last_error())
+            return False
+        log.info("Keyboard hook installed")
+        return True
+
+    def _watchdog(self) -> None:
+        """Windows silently removes a low-level hook whose callback times out. Probe for that.
+
+        A synthetic key is injected every WATCHDOG_SECONDS; if the callback does not see it, the
+        hook is gone and gets reinstalled on the hook thread.
+        """
+        while not self._stopping:
+            time.sleep(WATCHDOG_SECONDS)
+            if self._stopping or not self._thread_id:
+                continue
+            self._seen.clear()
+            send_inputs([_key(VK_PROBE), _key(VK_PROBE, flags=KEYEVENTF_KEYUP)])
+            if self._seen.wait(1.0):
+                continue
+            log.warning("Keyboard hook stopped receiving events; reinstalling")
+            if self._hook:
+                user32.UnhookWindowsHookEx(self._hook)
+                self._hook = None
+            user32.PostThreadMessageW(self._thread_id, WM_REINSTALL, 0, 0)
+            self._reinstalls += 1
+            if self.on_reinstall:
+                self.on_reinstall(self._reinstalls)
 
     def _callback(self, n_code: int, w_param: int, l_param: int) -> int:
         if n_code == 0:
             kb = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+            self._seen.set()  # proof for the watchdog that the hook is still alive
+            if kb.vkCode == VK_PROBE:
+                return 1
             if kb.dwExtraInfo != FLOW_MAGIC:
                 try:
                     if self._handle(kb, w_param):

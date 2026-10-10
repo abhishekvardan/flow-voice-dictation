@@ -60,6 +60,38 @@ class History:
             cutoff = time.time() - retention_days * 86400
             self._db.execute("DELETE FROM history WHERE created_at < ?", (cutoff,))
 
+    def summary(self) -> dict:
+        """Totals for the Stats tab."""
+        rows = self._db.query(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(duration), 0) AS secs, "
+            "COALESCE(AVG(stt_ms), 0) AS stt, COALESCE(AVG(llm_ms), 0) AS llm FROM history")
+        row = rows[0] if rows else None
+        words, wpm = self.stats()
+        return {
+            "dictations": row["n"] if row else 0,
+            "seconds": row["secs"] if row else 0,
+            "words": words,
+            "wpm": wpm,
+            "avg_stt_ms": row["stt"] if row else 0,
+            "avg_llm_ms": row["llm"] if row else 0,
+        }
+
+    def by_column(self, column: str, limit: int = 8) -> list[tuple[str, int, int]]:
+        """Most used apps / styles / modes: (value, dictations, words)."""
+        if column not in ("app", "style", "mode"):
+            raise ValueError(column)
+        rows = self._db.query(
+            f"SELECT {column} AS key, COUNT(*) AS n, SUM(LENGTH(final) - LENGTH(REPLACE(final, ' ', '')) + 1) "
+            f"AS words FROM history WHERE {column} IS NOT NULL AND {column} != '' "
+            f"GROUP BY {column} ORDER BY n DESC LIMIT ?", (limit,))
+        return [(row["key"], row["n"], row["words"] or 0) for row in rows]
+
+    def per_day(self, days: int = 14) -> list[tuple[str, int]]:
+        rows = self._db.query(
+            "SELECT date(created_at, 'unixepoch', 'localtime') AS day, COUNT(*) AS n "
+            "FROM history GROUP BY day ORDER BY day DESC LIMIT ?", (days,))
+        return [(row["day"], row["n"]) for row in rows]
+
     def stats(self) -> tuple[int, float]:
         """Total words dictated and average words per minute."""
         rows = self._db.query("SELECT final, duration FROM history WHERE mode = 'dictate'")

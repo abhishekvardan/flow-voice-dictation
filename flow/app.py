@@ -20,7 +20,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 from . import config
 from .audio import SAMPLE_RATE, Recorder, Sounds, is_silent
 from .config import Config, data_dir
-from .context import WindowContext, active_window
+from .context import WindowContext, active_window, is_elevated
 from .db import Database
 from .dictionary import Dictionary
 from .history import History
@@ -28,7 +28,7 @@ from .skills import Skills
 from .hotkeys import HotkeyEngine
 from . import languages
 from .inserter import Inserter
-from .llm import OllamaClient, OllamaError
+from .llm import OllamaClient, OllamaError, is_local_url
 from .pipeline import process
 from .stt import Transcriber, model_for_language
 from .timing import Timeline
@@ -85,6 +85,7 @@ class FlowApp(QObject):
         self.sounds.enabled = self.cfg.sounds
         self.transcriber = Transcriber()
         self.llm = OllamaClient(self.cfg.ollama_url, self.cfg.ollama_model, self.cfg.llm_timeout)
+        self.llm_blocked = ""  # reason AI cleanup is refused (local-only policy)
         self.inserter = Inserter()
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="flow-job")
 
@@ -124,7 +125,7 @@ class FlowApp(QObject):
             on_action=s.action.emit,
         )
         self._apply_hotkeys()
-        self.hook = KeyboardHook(self.engine)
+        self.hook = KeyboardHook(self.engine, on_reinstall=self._on_hook_reinstalled)
 
         self.overlay = Overlay(lambda: self.recorder.level)
         self.overlay.stop_clicked.connect(self._ui_stop)
@@ -142,6 +143,8 @@ class FlowApp(QObject):
         self.tray.show()
         threading.Thread(target=self._load_whisper, daemon=True, name="flow-load-whisper").start()
         threading.Thread(target=self._check_ollama, daemon=True, name="flow-load-ollama").start()
+        if not self.cfg.welcome_shown:
+            QTimer.singleShot(1500, self.open_welcome)
         log.info("Flow started. Dictate: %s | Hands-free: %s | Command: %s",
                  self.cfg.hotkey_dictate, self.cfg.hotkey_handsfree, self.cfg.hotkey_command)
 
@@ -165,12 +168,25 @@ class FlowApp(QObject):
         self.signals.status_changed.emit()
 
     def _check_ollama(self) -> None:
+        self.llm_blocked = ""
+        if self.cfg.local_only and not is_local_url(self.cfg.ollama_url):
+            self.llm_blocked = f"{self.cfg.ollama_url} is not on this machine"
+            self.ollama_status = "Ollama: blocked by local-only mode"
+            self._warn(f"AI cleanup is off: {self.llm_blocked}. Turn off local-only mode in "
+                       f"Settings to allow it.")
+            self.signals.status_changed.emit()
+            return
         try:
             models = self.llm.list_models()
             wanted = self.llm.model
             if wanted not in models and f"{wanted}:latest" not in models:
                 self.ollama_status = f"Ollama: model '{wanted}' not installed"
                 self._warn(f"Ollama model '{wanted}' is not installed. Run: ollama pull {wanted}")
+            elif self.cfg.local_only and self.llm.is_cloud_pointer(wanted):
+                self.llm_blocked = f"'{wanted}' is a cloud model"
+                self.ollama_status = f"Ollama: '{wanted}' is a cloud model (blocked)"
+                self._warn(f"AI cleanup is off: '{wanted}' holds no local weights, so your text "
+                           f"would leave this machine. Pick a local model in Settings.")
             else:
                 self.ollama_status = f"Ollama: warming up {wanted}…"
                 self.signals.status_changed.emit()
@@ -253,6 +269,9 @@ class FlowApp(QObject):
             return
         self._session = session
         self._limit_timer.start()
+        if session.ctx.elevated and not is_elevated():
+            self._warn("That window runs as administrator, so Windows will block Flow from typing "
+                       "into it. Start Flow as administrator to dictate there.")
         self._warm_llm()
         if handsfree:
             self._reveal(session.id)
@@ -261,7 +280,7 @@ class FlowApp(QObject):
 
     def _warm_llm(self) -> None:
         """Loads the cleanup model in the background while recording, hiding Ollama's load time."""
-        if not self.cfg.cleanup_enabled or self._warming:
+        if not self.cfg.cleanup_enabled or self.llm_blocked or self._warming:
             return
         if time.monotonic() - self._last_llm_use < WARM_AFTER_SECONDS:
             return  # still resident in Ollama
@@ -319,7 +338,7 @@ class FlowApp(QObject):
         self._pending_jobs += 1
         self.overlay.show_processing()
         self._set_icon("processing")
-        self.executor.submit(self._run_job, session, audio, duration, self.cfg)
+        self.executor.submit(self._run_job, session, audio, duration, self._effective_config())
 
     def _on_cancel(self, was_tap: bool) -> None:
         session, self._session = self._session, None
@@ -463,6 +482,7 @@ class FlowApp(QObject):
         self._recent_menu = menu.addMenu("Recent dictations")
         self._recent_menu.aboutToShow.connect(self._fill_recent)
         menu.addAction("Last dictation…", self.open_fixup)
+        menu.addAction("Getting started…", self.open_welcome)
         menu.addAction("Settings…", self.open_settings)
         menu.addSeparator()
         menu.addAction("Quit Flow", self.quit)
@@ -527,6 +547,18 @@ class FlowApp(QObject):
         self._set_icon("paused" if paused else "idle")
         self._refresh_tray()
 
+    def _on_hook_reinstalled(self, count: int) -> None:
+        self._warn(f"Windows dropped Flow's keyboard hook; it has been reinstalled "
+                   f"({count} time{'s' if count != 1 else ''} this session).")
+
+    def _effective_config(self) -> Config:
+        """The config a job should run with: AI cleanup off when the model is not trusted."""
+        if not self.llm_blocked:
+            return self.cfg
+        cfg = self.cfg.copy()
+        cfg.cleanup_enabled = False
+        return cfg
+
     def _warn(self, message: str) -> None:
         """Thread-safe tray warning."""
         self.signals.warning.emit(message)
@@ -568,6 +600,12 @@ class FlowApp(QObject):
                 self.signals.job_failed.emit(f"Could not insert: {exc}")
 
         threading.Thread(target=work, daemon=True, name="flow-fixup-insert").start()
+
+    def open_welcome(self) -> None:
+        from .ui.welcome import WelcomeDialog
+
+        dialog = WelcomeDialog(self)
+        dialog.exec()
 
     def open_settings(self) -> None:
         from .ui.settings import SettingsWindow
